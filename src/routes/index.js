@@ -10,6 +10,7 @@ import facultyRoutes from './faculty.routes.js';
 import facultiesRoutes from './faculties.routes.js';
 import studentRoutes from './student.routes.js';
 import adminRoutes from './admin.routes.js';
+import userAdminRoutes from './user-admin.routes.js';
 
 const router = Router();
 
@@ -24,5 +25,6 @@ router.use('/faculties', facultiesRoutes);
 router.use('/faculty', facultyRoutes);
 router.use('/student', studentRoutes);
 router.use('/admin', adminRoutes);
+router.use('/users', userAdminRoutes);
 
 export default router;
