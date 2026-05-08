@@ -1,0 +1,304 @@
+import { pool, query } from '../db/index.js';
+
+// list registrations ของกิจกรรม (สำหรับ faculty_staff ดู/จัดการผู้สมัคร)
+//   - JOIN users เพื่อดึงชื่อ + msu_id + faculty
+//   - JOIN attendances เพื่อดู attendance_status (ของ row valid ล่าสุด)
+//   - default ไม่ filter status — UI filter ฝั่ง client
+export async function listByActivity(activityId) {
+  const { rows } = await query(
+    `SELECT r.id              AS registration_id,
+            r.status          AS registration_status,
+            r.qr_token,
+            r.registered_at,
+            r.approved_at,
+            r.approved_by,
+            r.cancelled_at,
+            r.cancelled_by,
+            r.cancel_reason,
+            r.attended_at,
+            r.evaluation_status,
+            r.evaluated_at,
+            r.evaluated_by,
+            r.evaluation_note,
+            u.id              AS user_id,
+            u.full_name       AS student_name,
+            u.email,
+            u.msu_id,
+            u.faculty_id,
+            u.faculty_name,
+            (
+              SELECT att.status
+                FROM attendances att
+               WHERE att.registration_id = r.id
+               ORDER BY att.checked_in_at DESC
+               LIMIT 1
+            ) AS attendance_status
+       FROM registrations r
+       JOIN users u ON u.id = r.user_id
+      WHERE r.activity_id = $1
+      ORDER BY r.registered_at ASC`,
+    [activityId],
+  );
+  return rows;
+}
+
+// staff manual check-in — เจ้าหน้าที่กดเช็คอินแทนนิสิต (เลือกได้ทีละคน/หลายคน)
+//   - bypass window/qr — เป็น override ที่ใช้เมื่อ QR เสีย/นิสิตไม่ถนัด หรือเช็คอินรวบทีหลัง
+//   - ตรวจ activity_id + status='REGISTERED' ใน WHERE → ข้าม id ที่ไม่ตรง
+//   - INSERT attendance (method='MANUAL_STAFF') + UPDATE reg → ATTENDED + PENDING_EVALUATION
+//   - ใช้ CTE ให้ทั้งสองคำสั่งทำในคำสั่ง SQL เดียว (atomic ระดับ statement, partial-skip ได้)
+export async function staffCheckInBulk({
+  activityId,
+  registrationIds,
+  staffId,
+}) {
+  if (registrationIds.length === 0) return { checkedIn: [], skipped: [] };
+  const { rows } = await query(
+    `WITH eligible AS (
+       UPDATE registrations
+          SET status            = 'ATTENDED',
+              attended_at       = now(),
+              evaluation_status = 'PENDING_EVALUATION',
+              updated_at        = now()
+        WHERE id = ANY($1::int[])
+          AND activity_id = $2
+          AND status = 'REGISTERED'
+       RETURNING id
+     )
+     INSERT INTO attendances (registration_id, method, status, checked_in_by)
+     SELECT id, 'MANUAL_STAFF', 'VALID', $3 FROM eligible
+     RETURNING registration_id`,
+    [registrationIds, activityId, staffId],
+  );
+  const checkedIn = rows.map((r) => r.registration_id);
+  const set = new Set(checkedIn);
+  const skipped = registrationIds.filter((id) => !set.has(id));
+  return { checkedIn, skipped };
+}
+
+// บันทึกผลประเมินหลายคนพร้อมกัน — single UPDATE กับ ANY(ids)
+//   - บังคับ activity_id ใน WHERE → กันสับ id ข้ามกิจกรรม (ใช้ scope ระดับ DB)
+//   - บังคับ status='ATTENDED' → reg ที่ยังไม่เช็คอินจะถูกข้าม (ไม่ throw)
+//   - คืน { updated: number[], skipped: number[] } เพื่อให้ controller รายงานผลได้ครบ
+export async function bulkEvaluateRegistrations({
+  activityId,
+  registrationIds,
+  evaluatorId,
+  result,
+  note,
+}) {
+  if (registrationIds.length === 0) return { updated: [], skipped: [] };
+  const { rows } = await query(
+    `UPDATE registrations
+        SET evaluation_status = $2,
+            evaluation_note   = $3,
+            evaluated_at      = now(),
+            evaluated_by      = $4,
+            updated_at        = now()
+      WHERE id = ANY($1::int[])
+        AND activity_id = $5
+        AND status = 'ATTENDED'
+      RETURNING id`,
+    [registrationIds, result, note ?? null, evaluatorId, activityId],
+  );
+  const updated = rows.map((r) => r.id);
+  const updatedSet = new Set(updated);
+  const skipped = registrationIds.filter((id) => !updatedSet.has(id));
+  return { updated, skipped };
+}
+
+// บันทึกผลประเมินการเข้าร่วม (PASSED / FAILED) — เจ้าหน้าที่คณะให้หลังนิสิตเช็คอิน
+//   - ตรวจ status = 'ATTENDED' (ต้องเช็คอินก่อน) + อนุญาตเปลี่ยนผลซ้ำ (เช่น แก้ไขจาก FAILED → PASSED)
+//   - คืน updated row หรือ null ถ้า precondition ไม่ตรง
+export async function evaluateRegistration(
+  registrationId,
+  evaluatorId,
+  result,
+  note,
+) {
+  const { rows } = await query(
+    `UPDATE registrations
+        SET evaluation_status = $2,
+            evaluation_note   = $3,
+            evaluated_at      = now(),
+            evaluated_by      = $4,
+            updated_at        = now()
+      WHERE id = $1
+        AND status = 'ATTENDED'
+      RETURNING id,
+                status,
+                evaluation_status,
+                evaluation_note,
+                evaluated_at,
+                evaluated_by`,
+    [registrationId, result, note ?? null, evaluatorId],
+  );
+  return rows[0] || null;
+}
+
+// approve: PENDING_APPROVAL → REGISTERED + gen qr_token + บันทึก approver
+//   counter ไม่เปลี่ยน เพราะ register ตอนแรกได้ +1 แล้ว
+//   (status ทั้งสองเป็น active ใน partial unique index)
+export async function approveRegistration(registrationId, approverId) {
+  const { rows } = await query(
+    `UPDATE registrations
+        SET status      = 'REGISTERED',
+            qr_token    = COALESCE(qr_token, gen_random_uuid()),
+            approved_at = now(),
+            approved_by = $2,
+            updated_at  = now()
+      WHERE id = $1
+        AND status = 'PENDING_APPROVAL'
+      RETURNING id, status, qr_token, activity_id`,
+    [registrationId, approverId],
+  );
+  return rows[0] || null;
+}
+
+// cancel โดย staff (จาก PENDING_APPROVAL หรือ REGISTERED)
+//   → CANCELLED_BY_STAFF + คืน slot (-1 counter) ใน transaction
+export async function cancelByStaff(registrationId, staffId, reason) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `UPDATE registrations
+          SET status        = 'CANCELLED_BY_STAFF',
+              cancelled_at  = now(),
+              cancelled_by  = $2,
+              cancel_reason = $3,
+              updated_at    = now()
+        WHERE id = $1
+          AND status IN ('PENDING_APPROVAL', 'REGISTERED')
+        RETURNING id, status, activity_id`,
+      [registrationId, staffId, reason ?? null],
+    );
+    if (rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    await client.query(
+      `UPDATE activities
+          SET registered_count = GREATEST(registered_count - 1, 0)
+        WHERE id = $1`,
+      [rows[0].activity_id],
+    );
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// bulk add: เจ้าหน้าที่คณะเพิ่มรายชื่อนิสิตเข้ากิจกรรมจาก msu_id หลายคน
+//   - ข้าม window check + eligible_faculties (staff override)
+//   - คงไว้: status=WORK, capacity, ไม่ซ้ำ active registration
+//   - REGISTERED ทันที + gen qr_token (staff add = pre-approved)
+//
+//   คืน { added: [{msu_id, user_id, registration_id}], errors: [{msu_id, reason}] }
+//   reason: 'NOT_FOUND' | 'NOT_STUDENT' | 'ALREADY_REGISTERED' | 'FULL' | 'NOT_OPEN'
+export async function bulkAddByMsuIds(activityId, msuIds, staffId) {
+  const added = [];
+  const errors = [];
+
+  for (const rawMsuId of msuIds) {
+    const msuId = String(rawMsuId).trim();
+    if (!msuId) continue;
+
+    // 1. หา user
+    const userRes = await query(
+      `SELECT id, role FROM users WHERE msu_id = $1 LIMIT 1`,
+      [msuId],
+    );
+    const u = userRes.rows[0];
+    if (!u) {
+      errors.push({ msu_id: msuId, reason: 'NOT_FOUND' });
+      continue;
+    }
+    if (u.role !== 'student') {
+      errors.push({ msu_id: msuId, reason: 'NOT_STUDENT' });
+      continue;
+    }
+
+    // 2. atomic insert ใน transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // counter +1 — ตรวจ WORK + capacity (skip window)
+      const upd = await client.query(
+        `UPDATE activities
+            SET registered_count = registered_count + 1
+          WHERE id = $1
+            AND status = 'WORK'
+            AND registered_count < capacity
+         RETURNING id`,
+        [activityId],
+      );
+      if (upd.rows.length === 0) {
+        await client.query('ROLLBACK');
+        // หาเหตุผล — query stat
+        const a = await query(
+          `SELECT status, registered_count, capacity FROM activities WHERE id = $1`,
+          [activityId],
+        );
+        const reason =
+          !a.rows[0] || a.rows[0].status !== 'WORK'
+            ? 'NOT_OPEN'
+            : a.rows[0].registered_count >= a.rows[0].capacity
+              ? 'FULL'
+              : 'NOT_OPEN';
+        errors.push({ msu_id: msuId, reason });
+        continue;
+      }
+
+      // INSERT registration — staff add = REGISTERED + qr_token ทันที
+      const ins = await client.query(
+        `INSERT INTO registrations
+           (user_id, activity_id, status, qr_token, approved_at, approved_by)
+         VALUES ($1, $2, 'REGISTERED', gen_random_uuid(), now(), $3)
+         RETURNING id`,
+        [u.id, activityId, staffId],
+      );
+
+      await client.query('COMMIT');
+      added.push({
+        msu_id: msuId,
+        user_id: u.id,
+        registration_id: ins.rows[0].id,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      if (err?.code === '23505') {
+        errors.push({ msu_id: msuId, reason: 'ALREADY_REGISTERED' });
+      } else {
+        // unexpected — บันทึกแล้วไปต่อ (ไม่ throw เพื่อให้ batch ทำงานครบ)
+        console.error('[bulkAdd] unexpected error', err);
+        errors.push({ msu_id: msuId, reason: 'ERROR' });
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  return { added, errors };
+}
+
+// helper: ดึง registration row + activity context (ใช้ใน controller scope check)
+export async function findRegistrationWithActivity(registrationId) {
+  const { rows } = await query(
+    `SELECT r.id              AS registration_id,
+            r.status,
+            r.activity_id,
+            a.created_by       AS activity_created_by,
+            a.faculty_id       AS activity_faculty_id
+       FROM registrations r
+       JOIN activities a ON a.id = r.activity_id
+      WHERE r.id = $1`,
+    [registrationId],
+  );
+  return rows[0] || null;
+}

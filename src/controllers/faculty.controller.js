@@ -1,0 +1,127 @@
+import {
+  createFaculty,
+  findById,
+  findByCode,
+  listFaculties,
+  softDeleteFaculty,
+  updateFaculty,
+} from '../models/faculty.model.js';
+
+// code = ตัวอักษร/ตัวเลข 1-10 ตัว — เผื่อ MSU ใช้ทั้งตัวเลข (01..) และตัวอักษร
+const CODE_REGEX = /^[A-Z0-9]{1,10}$/;
+// category — ปัจจุบันใช้ 'A' หรือ NULL; allow string 1-4 ตัวเผื่ออนาคต
+const CATEGORY_REGEX = /^[A-Z]{1,4}$/;
+
+function badRequest(res, message) {
+  return res.status(400).json({ status: 'error', message });
+}
+function conflict(res, message) {
+  return res.status(409).json({ status: 'error', message });
+}
+function notFound(res, message = 'faculty not found') {
+  return res.status(404).json({ status: 'error', message });
+}
+
+function parseBoolFlag(value) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+export async function list(req, res) {
+  const isActive = parseBoolFlag(req.query.is_active);
+  const q = req.query.q?.trim() || null;
+  const category = req.query.category?.trim() || null;
+  const items = await listFaculties({ isActive, q, category });
+  res.json({ items });
+}
+
+export async function getOne(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return badRequest(res, 'invalid id');
+  const item = await findById(id);
+  if (!item) return notFound(res);
+  res.json(item);
+}
+
+export async function create(req, res) {
+  const { code, name, category = null, is_active = true } = req.body ?? {};
+
+  if (typeof code !== 'string' || !CODE_REGEX.test(code)) {
+    return badRequest(res, 'code ต้องเป็นตัวอักษรพิมพ์ใหญ่/ตัวเลข 1–10 ตัว');
+  }
+  if (typeof name !== 'string' || !name.trim()) {
+    return badRequest(res, 'name ต้องไม่ว่าง');
+  }
+  if (category !== null) {
+    if (typeof category !== 'string' || !CATEGORY_REGEX.test(category)) {
+      return badRequest(res, 'category ต้องเป็นตัวอักษรพิมพ์ใหญ่ 1–4 ตัว หรือ null');
+    }
+  }
+  if (typeof is_active !== 'boolean' && is_active !== undefined) {
+    return badRequest(res, 'is_active ต้องเป็น boolean');
+  }
+
+  const dup = await findByCode(code);
+  if (dup) return conflict(res, `code "${code}" ซ้ำกับรายการที่มีอยู่`);
+
+  const created = await createFaculty({
+    code,
+    name: name.trim(),
+    category,
+    is_active: !!is_active,
+  });
+  res.status(201).json(created);
+}
+
+export async function update(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return badRequest(res, 'invalid id');
+
+  const existing = await findById(id);
+  if (!existing) return notFound(res);
+
+  const { code, name, category, is_active } = req.body ?? {};
+
+  if (code !== undefined) {
+    if (typeof code !== 'string' || !CODE_REGEX.test(code)) {
+      return badRequest(res, 'code ต้องเป็นตัวอักษรพิมพ์ใหญ่/ตัวเลข 1–10 ตัว');
+    }
+    if (code !== existing.code) {
+      const dup = await findByCode(code);
+      if (dup) return conflict(res, `code "${code}" ซ้ำกับรายการที่มีอยู่`);
+    }
+  }
+  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+    return badRequest(res, 'name ต้องไม่ว่าง');
+  }
+  if (category !== undefined && category !== null) {
+    if (typeof category !== 'string' || !CATEGORY_REGEX.test(category)) {
+      return badRequest(res, 'category ต้องเป็นตัวอักษรพิมพ์ใหญ่ 1–4 ตัว หรือ null');
+    }
+  }
+  if (is_active !== undefined && typeof is_active !== 'boolean') {
+    return badRequest(res, 'is_active ต้องเป็น boolean');
+  }
+
+  const updated = await updateFaculty(id, {
+    code,
+    name: name?.trim(),
+    category,
+    is_active,
+  });
+  res.json(updated);
+}
+
+export async function softDelete(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return badRequest(res, 'invalid id');
+
+  const updated = await softDeleteFaculty(id);
+  if (!updated) {
+    const exists = await findById(id);
+    if (!exists) return notFound(res);
+    return conflict(res, 'faculty ถูกปิดใช้งานอยู่แล้ว');
+  }
+  res.json(updated);
+}
