@@ -425,17 +425,22 @@ export async function setActivityStatus(id, newStatus, actorId) {
       codeAssigned = true;
     }
 
+    // ★ ต้อง cast $2 ทุกที่อย่างชัดเจน ไม่งั้น Postgres deduce type ขัดกันเอง:
+    //     - status = $2                  → expect activity_status
+    //     - $2 = 'WORK'                  → expect text
+    //   ผลลัพธ์: error "inconsistent types deduced for parameter $2"
+    //   ใช้ $2::text ทุกที่แล้ว cast ที่ column ตอน assignment
     const { rows } = await client.query(
       `UPDATE activities
-          SET status        = $2,
-              code          = COALESCE($3, code),
-              approved_at   = CASE WHEN $2 = 'WORK' AND approved_at IS NULL
+          SET status        = $2::activity_status,
+              code          = COALESCE($3::text, code),
+              approved_at   = CASE WHEN $2::text = 'WORK' AND approved_at IS NULL
                                    THEN now() ELSE approved_at END,
-              approved_by   = CASE WHEN $2 = 'WORK' AND approved_by IS NULL
-                                   THEN $4   ELSE approved_by END,
-              published_at  = CASE WHEN $2 = 'WORK' AND published_at IS NULL
+              approved_by   = CASE WHEN $2::text = 'WORK' AND approved_by IS NULL
+                                   THEN $4::int ELSE approved_by END,
+              published_at  = CASE WHEN $2::text = 'WORK' AND published_at IS NULL
                                    THEN now() ELSE published_at END,
-              rejection_reason = CASE WHEN $2 = 'DRAFT'
+              rejection_reason = CASE WHEN $2::text = 'DRAFT'
                                       THEN rejection_reason ELSE NULL END,
               updated_at    = now()
         WHERE id = $1
