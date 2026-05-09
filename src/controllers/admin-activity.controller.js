@@ -187,6 +187,33 @@ export async function bulkReject(req, res) {
   res.json({ status: 'ok', ...out });
 }
 
+// PATCH /api/admin/activities/:id/status  (super_admin only — bypass state machine)
+// body: { status: 'DRAFT' | 'PENDING_APPROVAL' | 'WORK' | 'COMPLETED' }
+export async function setStatus(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const status = req.body?.status;
+  if (typeof status !== 'string' || !ALLOWED_STATUSES.has(status)) {
+    return err(
+      res,
+      400,
+      `status ต้องเป็นค่าใดค่าหนึ่ง: ${[...ALLOWED_STATUSES].join(', ')}`,
+    );
+  }
+
+  const result = await activities.setActivityStatus(id, status, req.user.id);
+  if (!result) return err(res, 404, 'activity not found');
+  if (result.full) {
+    return err(
+      res,
+      422,
+      'รหัสกิจกรรมในกลุ่ม (หน่วยงาน × ปีการศึกษา × ภาค × ประเภท) เต็ม (เกิน 100) — ไม่สามารถสร้าง code ใหม่ได้',
+    );
+  }
+  res.json({ status: 'ok', activity: result.activity, code_assigned: result.codeAssigned });
+}
+
 // POST /api/admin/activities/:id/reject
 // body: { reason: string }
 export async function reject(req, res) {

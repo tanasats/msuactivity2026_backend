@@ -9,6 +9,7 @@ import {
   detail,
   list,
   reject,
+  setStatus,
   stats,
 } from '../controllers/admin-activity.controller.js';
 
@@ -26,5 +27,11 @@ router.post('/activities/bulk-reject', asyncHandler(bulkReject));
 router.get('/activities/:id', asyncHandler(detail));
 router.post('/activities/:id/approve', asyncHandler(approve));
 router.post('/activities/:id/reject', asyncHandler(reject));
+// per-route guard: super_admin only — override state machine
+router.patch(
+  '/activities/:id/status',
+  requireRole('super_admin'),
+  asyncHandler(setStatus),
+);
 
 export default router;

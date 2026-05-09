@@ -381,6 +381,78 @@ export async function bulkApproveActivities(ids, approverId) {
   return { approved, skipped };
 }
 
+// super_admin override: บังคับเปลี่ยน status ไปค่าใดก็ได้ (ข้าม state machine)
+//   ใช้กรณี recovery / แก้ผิดที่ flow ปกติทำไม่ได้ เช่น WORK → DRAFT, COMPLETED → WORK
+//   side effects ที่เก็บข้อมูลให้สอดคล้อง:
+//     - newStatus เป็น WORK หรือ COMPLETED + ยังไม่มี code → assign code (counter upsert)
+//     - newStatus เป็น WORK + ยังไม่มี approved_at → set approved_at/by ตอนนี้
+//     - newStatus เป็น WORK + ยังไม่มี published_at → set published_at ตอนนี้
+//     - newStatus ไม่ใช่ DRAFT → clear rejection_reason (ไม่เกี่ยวข้องอีกต่อไป)
+//   คืนค่า:
+//     null                              ถ้าไม่พบ activity
+//     { full: true }                   ถ้าต้อง assign code แต่ counter เต็ม
+//     { activity, codeAssigned: bool } เคสปกติ
+const STATUSES_NEEDING_CODE = new Set(['WORK', 'COMPLETED']);
+
+export async function setActivityStatus(id, newStatus, actorId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: cur } = await client.query(
+      `SELECT id, status, code, approved_at FROM activities WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (cur.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const before = cur[0];
+
+    let codeAssigned = false;
+    let codeOverride = null; // ส่ง null ถ้าไม่ assign ใหม่ (UPDATE ใช้ COALESCE)
+    if (STATUSES_NEEDING_CODE.has(newStatus) && !before.code) {
+      const codeRes = await assignActivityCodeTx(client, id);
+      if (!codeRes) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (codeRes.full) {
+        await client.query('ROLLBACK');
+        return { full: true };
+      }
+      codeOverride = codeRes.code;
+      codeAssigned = true;
+    }
+
+    const { rows } = await client.query(
+      `UPDATE activities
+          SET status        = $2,
+              code          = COALESCE($3, code),
+              approved_at   = CASE WHEN $2 = 'WORK' AND approved_at IS NULL
+                                   THEN now() ELSE approved_at END,
+              approved_by   = CASE WHEN $2 = 'WORK' AND approved_by IS NULL
+                                   THEN $4   ELSE approved_by END,
+              published_at  = CASE WHEN $2 = 'WORK' AND published_at IS NULL
+                                   THEN now() ELSE published_at END,
+              rejection_reason = CASE WHEN $2 = 'DRAFT'
+                                      THEN rejection_reason ELSE NULL END,
+              updated_at    = now()
+        WHERE id = $1
+        RETURNING id, status, code, approved_at, approved_by, published_at, updated_at`,
+      [id, newStatus, codeOverride, actorId],
+    );
+
+    await client.query('COMMIT');
+    return { activity: rows[0], codeAssigned };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // bulk reject: ทุกตัวใช้ reason เดียวกัน → กลับเป็น DRAFT
 export async function bulkRejectActivities(ids, reason) {
   if (ids.length === 0) return { rejected: [], skipped: [] };
