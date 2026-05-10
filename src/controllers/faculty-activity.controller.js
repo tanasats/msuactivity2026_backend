@@ -397,7 +397,12 @@ export async function update(req, res) {
     throw err;
   }
   // ถ้าเปลี่ยน poster สำเร็จ → ลบ object เก่าใน S3 (best-effort)
-  if (result?.oldPosterStorageKey && payload.poster) {
+  // ★ double-check: key ต้องไม่ตรงกับ key ใหม่ที่เพิ่งบันทึก (defense-in-depth)
+  if (
+    result?.oldPosterStorageKey &&
+    payload.poster &&
+    result.oldPosterStorageKey !== payload.poster.storage_key
+  ) {
     deleteObject(result.oldPosterStorageKey);
   }
   const updated = await decoratePoster(await activities.findById(id));

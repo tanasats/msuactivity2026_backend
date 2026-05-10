@@ -363,31 +363,37 @@ export async function updateActivity(id, payload, updatedBy) {
     }
 
     // poster: ถ้าส่งใหม่ → DELETE old + INSERT (อ่าน old storage_key เพื่อ caller ลบ)
+    //   ★ guard สำคัญ: ถ้า storage_key เดียวกับของเดิม (frontend ส่ง preview poster เดิมมา
+    //     โดยไม่ได้เปลี่ยนรูป) → SKIP ทั้งหมด ไม่งั้น DELETE+INSERT จะทำให้ caller ลบ
+    //     object ที่ DB ยังอ้างถึง = poster หายจาก MinIO
     if (payload.poster) {
       const { rows: oldRows } = await client.query(
         `SELECT storage_key FROM activity_files
           WHERE activity_id = $1 AND kind = 'POSTER'`,
         [id],
       );
-      oldPosterStorageKey = oldRows[0]?.storage_key ?? null;
+      const oldKey = oldRows[0]?.storage_key ?? null;
 
-      await client.query(
-        `DELETE FROM activity_files WHERE activity_id = $1 AND kind = 'POSTER'`,
-        [id],
-      );
-      await client.query(
-        `INSERT INTO activity_files
-           (activity_id, kind, filename, mime_type, size_bytes, storage_key, uploaded_by)
-         VALUES ($1, 'POSTER', $2, $3, $4, $5, $6)`,
-        [
-          id,
-          payload.poster.filename,
-          payload.poster.mime_type,
-          payload.poster.size_bytes,
-          payload.poster.storage_key,
-          updatedBy,
-        ],
-      );
+      if (oldKey !== payload.poster.storage_key) {
+        oldPosterStorageKey = oldKey;
+        await client.query(
+          `DELETE FROM activity_files WHERE activity_id = $1 AND kind = 'POSTER'`,
+          [id],
+        );
+        await client.query(
+          `INSERT INTO activity_files
+             (activity_id, kind, filename, mime_type, size_bytes, storage_key, uploaded_by)
+           VALUES ($1, 'POSTER', $2, $3, $4, $5, $6)`,
+          [
+            id,
+            payload.poster.filename,
+            payload.poster.mime_type,
+            payload.poster.size_bytes,
+            payload.poster.storage_key,
+            updatedBy,
+          ],
+        );
+      }
     }
 
     await client.query('COMMIT');
