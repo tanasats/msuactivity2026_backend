@@ -218,8 +218,9 @@ function validatePayload(body, { requirePoster = false } = {}) {
   if (!inRange(body.semester, 1, 3)) errs.push('"ภาคเรียน" ต้องเป็น 1, 2 หรือ 3');
 
   const hoursParsed = parseHours(body.hours);
-  if (hoursParsed === null || hoursParsed <= 0)
-    errs.push('"จำนวนชั่วโมง" ต้องเป็นตัวเลข > 0 (ทศนิยม 1 ตำแหน่ง)');
+  // hours = 0 อนุญาต — กิจกรรมที่ไม่นับชั่วโมง (เช่น ประชุมรับฟัง) แต่ยังลงทะเบียนได้
+  if (hoursParsed === null || hoursParsed < 0)
+    errs.push('"จำนวนชั่วโมง" ต้องเป็นตัวเลข ≥ 0 (ทศนิยม 1 ตำแหน่ง)');
   // loan_hours: optional ใน input → default 0; ถ้าใส่มาต้อง ≥ 0
   if (body.loan_hours !== undefined && body.loan_hours !== null && body.loan_hours !== '') {
     const loanParsed = parseHours(body.loan_hours);

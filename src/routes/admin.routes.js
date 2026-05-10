@@ -13,6 +13,17 @@ import {
   setStatus,
   stats,
 } from '../controllers/admin-activity.controller.js';
+import {
+  list as listSettings,
+  update as updateSetting,
+} from '../controllers/system-setting.controller.js';
+import {
+  listAdmin as listAnnouncements,
+  getOne as getAnnouncement,
+  create as createAnnouncement,
+  update as updateAnnouncement,
+  remove as removeAnnouncement,
+} from '../controllers/announcement.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -40,5 +51,20 @@ router.patch(
   requireRole('super_admin'),
   asyncHandler(setCreator),
 );
+
+// system settings — super_admin เท่านั้น (รวม academic_year, check-in window ฯลฯ)
+router.get('/settings', requireRole('super_admin'), asyncHandler(listSettings));
+router.put(
+  '/settings/:key',
+  requireRole('super_admin'),
+  asyncHandler(updateSetting),
+);
+
+// announcements — admin + super_admin จัดการ (อ่านบน public endpoint)
+router.get('/announcements', asyncHandler(listAnnouncements));
+router.post('/announcements', asyncHandler(createAnnouncement));
+router.get('/announcements/:id', asyncHandler(getAnnouncement));
+router.patch('/announcements/:id', asyncHandler(updateAnnouncement));
+router.delete('/announcements/:id', asyncHandler(removeAnnouncement));
 
 export default router;

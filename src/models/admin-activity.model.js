@@ -257,7 +257,11 @@ export async function listAllAcademicYears() {
 }
 
 // approve: PENDING_APPROVAL → WORK + บันทึก approver/timestamp + generate final code
-//   - generate code (counter upsert) ภายใน transaction เดียวกัน
+//   - ★ ถ้า activity มี code อยู่แล้ว (เคยถูก approve มาก่อน แล้วถูก super_admin override
+//     กลับเป็น DRAFT/PENDING) → ใช้ code เดิม ไม่ regenerate
+//     ป้องกัน unique-constraint violation ถ้า counter ตามไม่ทันหรือ activity อื่นใน
+//     กลุ่มเดียวกันใช้ suffix นั้นไปแล้ว
+//   - generate code (counter upsert) ภายใน transaction เดียวกัน เฉพาะกรณี code = NULL
 //   - เคลียร์ rejection_reason เผื่อกิจกรรมเคยโดน reject แล้ว resubmit
 //   คืน:
 //     row updated (มี code) | null ถ้า status ไม่ตรง precondition
@@ -268,7 +272,7 @@ export async function approveActivity(id, approverId) {
     await client.query('BEGIN');
 
     const { rows: cur } = await client.query(
-      `SELECT status FROM activities WHERE id = $1 FOR UPDATE`,
+      `SELECT status, code FROM activities WHERE id = $1 FOR UPDATE`,
       [id],
     );
     if (cur.length === 0 || cur[0].status !== 'PENDING_APPROVAL') {
@@ -276,14 +280,18 @@ export async function approveActivity(id, approverId) {
       return null;
     }
 
-    const codeRes = await assignActivityCodeTx(client, id);
-    if (!codeRes) {
-      await client.query('ROLLBACK');
-      return null;
-    }
-    if (codeRes.full) {
-      await client.query('ROLLBACK');
-      return { full: true };
+    let code = cur[0].code;
+    if (!code) {
+      const codeRes = await assignActivityCodeTx(client, id);
+      if (!codeRes) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (codeRes.full) {
+        await client.query('ROLLBACK');
+        return { full: true };
+      }
+      code = codeRes.code;
     }
 
     const { rows } = await client.query(
@@ -298,7 +306,7 @@ export async function approveActivity(id, approverId) {
         WHERE id = $1
           AND status = 'PENDING_APPROVAL'
         RETURNING id, status, code, approved_at, approved_by`,
-      [id, codeRes.code, approverId],
+      [id, code, approverId],
     );
 
     await client.query('COMMIT');
@@ -341,7 +349,7 @@ export async function bulkApproveActivities(ids, approverId) {
     try {
       await client.query('BEGIN');
       const { rows: cur } = await client.query(
-        `SELECT status FROM activities WHERE id = $1 FOR UPDATE`,
+        `SELECT status, code FROM activities WHERE id = $1 FOR UPDATE`,
         [id],
       );
       if (cur.length === 0 || cur[0].status !== 'PENDING_APPROVAL') {
@@ -349,11 +357,16 @@ export async function bulkApproveActivities(ids, approverId) {
         skipped.push(id);
         continue;
       }
-      const codeRes = await assignActivityCodeTx(client, id);
-      if (!codeRes || codeRes.full) {
-        await client.query('ROLLBACK');
-        skipped.push(id);
-        continue;
+      // ★ reuse code เดิมถ้ามี — เหตุผลเดียวกับ approveActivity (กัน unique violation)
+      let code = cur[0].code;
+      if (!code) {
+        const codeRes = await assignActivityCodeTx(client, id);
+        if (!codeRes || codeRes.full) {
+          await client.query('ROLLBACK');
+          skipped.push(id);
+          continue;
+        }
+        code = codeRes.code;
       }
       await client.query(
         `UPDATE activities
@@ -366,7 +379,7 @@ export async function bulkApproveActivities(ids, approverId) {
                 updated_at       = now()
           WHERE id = $1
             AND status = 'PENDING_APPROVAL'`,
-        [id, codeRes.code, approverId],
+        [id, code, approverId],
       );
       await client.query('COMMIT');
       approved.push(id);

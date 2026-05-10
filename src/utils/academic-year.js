@@ -6,6 +6,8 @@
 //
 // ตัวอย่าง: 6 พ.ค. 2026 (เดือน 5) → 2025 - 1 + 543 = ปีการศึกษา 2568
 //          1 ส.ค. 2026 (เดือน 8) → 2026 + 543 = ปีการศึกษา 2569
+//
+// boundary คงที่ 1 ส.ค. (มมส ใช้รูปแบบนี้สม่ำเสมอ ไม่จำเป็นต้อง configurable)
 export function getCurrentAcademicYearBE(now = new Date()) {
   const month = now.getMonth() + 1; // 1..12
   const yearAD = now.getFullYear();
