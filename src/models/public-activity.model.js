@@ -62,6 +62,35 @@ export async function listPublicActivities({ filter = null, limit = 12 } = {}) {
   return rows;
 }
 
+// public search: WORK + COMPLETED ทุกปี + match q บน title/code/location/organization
+//   - filter ที่ status เข้ม กัน leak DRAFT/PENDING ไม่ตั้งใจ
+//   - title/code ใช้ trigram GIN index → ILIKE เร็ว
+//   - location/organization name ใช้ ILIKE ปกติ (น้อย row พอรับได้)
+//   - เรียงให้ "ตรงกับ title มากสุด" ก่อน (similarity desc) — ใช้ pg_trgm operator <->
+//   - tie-break: WORK ก่อน COMPLETED, แล้ว created_at DESC (กิจกรรมล่าสุดก่อน)
+export async function searchPublicActivities(q, limit = 20) {
+  const pattern = `%${q}%`;
+  const { rows } = await query(
+    `SELECT ${SUMMARY_COLUMNS}
+       ${FROM_JOIN}
+      WHERE a.status IN ('WORK','COMPLETED')
+        AND (
+          a.title ILIKE $1
+          OR a.code::text ILIKE $1
+          OR a.location ILIKE $1
+          OR o.name ILIKE $1
+        )
+      ORDER BY
+        -- ตรงกับ title มากสุดก่อน (lower similarity = ใกล้กว่า)
+        similarity(a.title, $2) DESC,
+        CASE a.status WHEN 'WORK' THEN 0 ELSE 1 END,
+        a.created_at DESC
+      LIMIT $3`,
+    [pattern, q, limit],
+  );
+  return rows;
+}
+
 // detail: เฉพาะ WORK — รวม description + skills + eligible_faculties
 export async function getPublicActivityDetail(id) {
   const { rows } = await query(

@@ -24,3 +24,49 @@ export async function getPublicStats(academicYearBE) {
   );
   return rows[0];
 }
+
+// สถิติสำหรับ landing page — all-time totals + breakdown
+//   - activities_count: เฉพาะ status WORK + COMPLETED (กิจกรรมที่จัดจริง — ไม่นับ DRAFT/PENDING)
+//   - members_count   : บัญชีที่ active (ทุก role)
+//   - by_year         : กิจกรรมต่อปีการศึกษา แบ่ง work/completed (ทุกปีที่มีข้อมูล)
+//   - by_category     : กิจกรรมต่อหมวดประเภท 4 หมวด (ทุกปี รวม)
+export async function getLandingStats() {
+  const [totals, byYear, byCategory] = await Promise.all([
+    query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM activities
+            WHERE status IN ('WORK','COMPLETED')) AS activities_count,
+         (SELECT COUNT(*)::int FROM users WHERE status = 'active') AS members_count`,
+    ),
+    query(
+      `SELECT
+         academic_year,
+         COUNT(*) FILTER (WHERE status = 'WORK')::int      AS work_count,
+         COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS completed_count
+       FROM activities
+       WHERE status IN ('WORK','COMPLETED')
+       GROUP BY academic_year
+       ORDER BY academic_year ASC`,
+    ),
+    query(
+      `SELECT
+         c.id   AS category_id,
+         c.code AS category_code,
+         c.name AS category_name,
+         COUNT(a.id)::int AS count
+       FROM activity_categories c
+       LEFT JOIN activities a
+         ON a.category_id = c.id
+        AND a.status IN ('WORK','COMPLETED')
+       GROUP BY c.id, c.code, c.name
+       ORDER BY c.code ASC`,
+    ),
+  ]);
+
+  return {
+    activities_count: totals.rows[0].activities_count,
+    members_count: totals.rows[0].members_count,
+    by_year: byYear.rows,
+    by_category: byCategory.rows,
+  };
+}

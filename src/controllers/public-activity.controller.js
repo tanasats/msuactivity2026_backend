@@ -1,6 +1,7 @@
 import {
   listPublicActivities,
   getPublicActivityDetail,
+  searchPublicActivities,
 } from '../models/public-activity.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 
@@ -29,6 +30,34 @@ export async function list(req, res) {
     }),
   );
   res.json({ items: decorated, filter, limit });
+}
+
+// GET /api/public/activities/search?q=&limit=
+//   - WORK + COMPLETED เท่านั้น (กัน leak DRAFT/PENDING)
+//   - q ต้อง trim เกิน 1 ตัวอักษร — น้อยกว่านั้น ILIKE จะคืนผลเยอะเกิน + ไร้ประโยชน์
+export async function search(req, res) {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (q.length < 2) return res.json({ items: [], q, limit: 0 });
+  if (q.length > 200) {
+    return res.status(400).json({ status: 'error', message: 'q ยาวเกิน 200' });
+  }
+  let limit = Number.parseInt(req.query.limit, 10);
+  if (!Number.isInteger(limit) || limit < 1) limit = 20;
+  if (limit > MAX_LIMIT) limit = MAX_LIMIT;
+
+  const items = await searchPublicActivities(q, limit);
+  const decorated = await Promise.all(
+    items.map(async (a) => {
+      const { poster_storage_key, ...rest } = a;
+      return {
+        ...rest,
+        poster_url: poster_storage_key
+          ? await getPresignedGetUrl(poster_storage_key)
+          : null,
+      };
+    }),
+  );
+  res.json({ items: decorated, q, limit });
 }
 
 export async function detail(req, res) {
