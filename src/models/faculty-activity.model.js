@@ -54,6 +54,7 @@ export async function listByFaculty({
   status = null,
   mineOnly = false,
   academicYear = null,
+  search = null,
   limit = 50,
 } = {}) {
   const where = ['a.faculty_id = $1'];
@@ -70,6 +71,13 @@ export async function listByFaculty({
   if (academicYear !== null) {
     params.push(academicYear);
     where.push(`a.academic_year = $${params.length}`);
+  }
+  if (search) {
+    // ค้นในชื่อกิจกรรม + code (case-insensitive)
+    params.push(`%${search.toLowerCase()}%`);
+    where.push(
+      `(LOWER(a.title) LIKE $${params.length} OR LOWER(COALESCE(a.code, '')) LIKE $${params.length})`,
+    );
   }
 
   params.push(limit);
@@ -507,6 +515,22 @@ export async function submitActivity(id) {
             updated_at = now()
       WHERE id = $1
         AND status = 'DRAFT'
+      RETURNING id, status`,
+    [id],
+  );
+  return rows[0] || null;
+}
+
+// complete: WORK → COMPLETED — ผู้สร้างปิดโครงการเองหลังกิจกรรมจบ
+//   ตรวจ status='WORK' ตรงนี้ (atomic) — ownership/scope ตรวจใน controller layer
+//   คืน updated row หรือ null ถ้า status ไม่ใช่ WORK (race หรือสถานะเปลี่ยนแล้ว)
+export async function completeActivity(id) {
+  const { rows } = await query(
+    `UPDATE activities
+        SET status = 'COMPLETED',
+            updated_at = now()
+      WHERE id = $1
+        AND status = 'WORK'
       RETURNING id, status`,
     [id],
   );

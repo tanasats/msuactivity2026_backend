@@ -11,6 +11,7 @@ import {
   update,
   updateLimited,
   submit,
+  complete,
 } from '../controllers/faculty-activity.controller.js';
 import { scan } from '../controllers/check-in.controller.js';
 import { uploadPoster } from '../controllers/upload.controller.js';
@@ -20,6 +21,11 @@ import {
   patch as patchDoc,
   remove as removeDoc,
 } from '../controllers/activity-document.controller.js';
+import {
+  list as listGallery,
+  upload as uploadGallery,
+  remove as removeGallery,
+} from '../controllers/activity-gallery.controller.js';
 import {
   list as listRegistrations,
   approve as approveRegistration,
@@ -42,6 +48,12 @@ const documentUpload = multer({
   limits: { fileSize: 22 * 1024 * 1024 },
 });
 
+// gallery (รูปประกอบ) spec 5 MB + เผื่อ overhead เป็น 6 MB
+const galleryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 6 * 1024 * 1024 },
+});
+
 // endpoints สำหรับ faculty_staff (admin/super_admin เข้าได้ด้วย — ใช้ดูข้ามคณะภายหลัง)
 const router = Router();
 
@@ -56,6 +68,7 @@ router.post('/activities', asyncHandler(create));
 router.patch('/activities/:id', asyncHandler(update));
 router.patch('/activities/:id/limited', asyncHandler(updateLimited));
 router.post('/activities/:id/submit', asyncHandler(submit));
+router.post('/activities/:id/complete', asyncHandler(complete));
 router.post('/activities/:id/check-in', asyncHandler(scan));
 router.post(
   '/uploads/poster',
@@ -77,6 +90,18 @@ router.patch(
 router.delete(
   '/activities/:id/documents/:fileId',
   asyncHandler(removeDoc),
+);
+
+// activity gallery (รูปประกอบ kind=GALLERY) — เพิ่ม/ลบเฉพาะ status=WORK + max 10 รูป
+router.get('/activities/:id/gallery', asyncHandler(listGallery));
+router.post(
+  '/activities/:id/gallery',
+  galleryUpload.single('file'),
+  asyncHandler(uploadGallery),
+);
+router.delete(
+  '/activities/:id/gallery/:fileId',
+  asyncHandler(removeGallery),
 );
 
 // registrations management (เจ้าหน้าที่คณะดู/อนุมัติ/ยกเลิก)

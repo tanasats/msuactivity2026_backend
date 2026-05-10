@@ -9,6 +9,7 @@ import {
   detail,
   list,
   reject,
+  setCreator,
   setStatus,
   stats,
 } from '../controllers/admin-activity.controller.js';
@@ -32,6 +33,12 @@ router.patch(
   '/activities/:id/status',
   requireRole('super_admin'),
   asyncHandler(setStatus),
+);
+// per-route guard: super_admin only — โอน ownership ของกิจกรรม
+router.patch(
+  '/activities/:id/creator',
+  requireRole('super_admin'),
+  asyncHandler(setCreator),
 );
 
 export default router;

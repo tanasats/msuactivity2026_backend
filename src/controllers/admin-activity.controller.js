@@ -214,6 +214,35 @@ export async function setStatus(req, res) {
   res.json({ status: 'ok', activity: result.activity, code_assigned: result.codeAssigned });
 }
 
+// PATCH /api/admin/activities/:id/creator  (super_admin only)
+// body: { created_by: number }
+export async function setCreator(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const newCreatorId = Number(req.body?.created_by);
+  if (!Number.isInteger(newCreatorId) || newCreatorId < 1) {
+    return err(res, 400, 'created_by ต้องเป็น integer ≥ 1');
+  }
+
+  const result = await activities.setActivityCreator(id, newCreatorId);
+  if (result === null) return err(res, 404, 'activity not found');
+  if (!result.ok) {
+    if (result.reason === 'USER_NOT_FOUND')
+      return err(res, 400, 'ไม่พบผู้ใช้ที่จะตั้งเป็นผู้สร้าง');
+    if (result.reason === 'USER_DISABLED')
+      return err(res, 400, 'ผู้ใช้ที่จะตั้งเป็นผู้สร้างถูกระงับการใช้งาน');
+    if (result.reason === 'INVALID_ROLE')
+      return err(
+        res,
+        400,
+        'ผู้สร้างต้องมี role: faculty_staff / admin / super_admin เท่านั้น',
+      );
+    return err(res, 400, 'เปลี่ยนผู้สร้างไม่สำเร็จ');
+  }
+  res.json({ status: 'ok', activity: result.activity });
+}
+
 // POST /api/admin/activities/:id/reject
 // body: { reason: string }
 export async function reject(req, res) {

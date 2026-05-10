@@ -37,13 +37,14 @@ export async function createUser({
   return rows[0];
 }
 
-export async function updateGoogleProfile(id, { google_sub, picture_url }) {
+export async function updateGoogleProfile(id, { full_name, google_sub, picture_url }) {
   await query(
     `UPDATE users SET
-       google_sub  = COALESCE($2, google_sub),
-       picture_url = COALESCE($3, picture_url)
+       full_name   = COALESCE($2, full_name),
+       google_sub  = COALESCE($3, google_sub),
+       picture_url = COALESCE($4, picture_url)
      WHERE id = $1`,
-    [id, google_sub, picture_url],
+    [id, full_name,google_sub, picture_url],
   );
 }
 

@@ -80,6 +80,10 @@ export async function list(req, res) {
   }
   const mineOnly = req.query.mine === 'true';
   const academicYear = parseAcademicYear(req.query.academic_year);
+  const search =
+    typeof req.query.search === 'string' && req.query.search.trim().length > 0
+      ? req.query.search.trim().slice(0, 200)
+      : null;
   let limit = Number.parseInt(req.query.limit, 10);
   if (!Number.isInteger(limit) || limit < 1) limit = 50;
   if (limit > 200) limit = 200;
@@ -90,6 +94,7 @@ export async function list(req, res) {
     status: status ?? null,
     mineOnly,
     academicYear,
+    search,
     limit,
   });
 
@@ -110,6 +115,7 @@ export async function list(req, res) {
     status: status ?? null,
     mine_only: mineOnly,
     academic_year: academicYear,
+    search,
   });
 }
 
@@ -583,6 +589,44 @@ export async function submit(req, res) {
       `สถานะ ${existing.status} ไม่อนุญาตให้ส่งอนุมัติ (ต้องเป็น DRAFT)`,
     );
   }
+  const updated = await decoratePoster(await activities.findById(id));
+  res.json({
+    ...updated,
+    is_mine: true,
+    can_edit: EDITABLE_STATUSES.has(updated.status),
+    can_edit_limited: LIMITED_EDITABLE_STATUSES.has(updated.status),
+  });
+}
+
+// POST /api/faculty/activities/:id/complete
+// ปิดโครงการ — เฉพาะผู้สร้างกิจกรรม + status WORK เท่านั้น
+//   COMPLETED เป็น terminal state ในการมองของ faculty (จะ reverse ต้องผ่าน super_admin)
+export async function complete(req, res) {
+  if (!requireFaculty(req, res)) return;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return badRequest(res, 'invalid id');
+
+  const existing = await activities.findById(id);
+  if (!existing) return notFound(res);
+  if (existing.created_by_faculty_id !== req.user.faculty_id)
+    return forbidden(res, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
+  if (existing.created_by !== req.user.id)
+    return forbidden(res, 'ปิดโครงการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
+  if (existing.status !== 'WORK')
+    return conflict(
+      res,
+      `สถานะ ${existing.status} ไม่อนุญาตให้ปิดโครงการ (ต้องเป็น WORK)`,
+    );
+
+  const result = await activities.completeActivity(id);
+  if (!result) {
+    // race: status เปลี่ยนระหว่าง check กับ update
+    return conflict(
+      res,
+      'สถานะกิจกรรมเปลี่ยนระหว่างทำงาน — โหลดหน้าใหม่แล้วลองอีกครั้ง',
+    );
+  }
+
   const updated = await decoratePoster(await activities.findById(id));
   res.json({
     ...updated,

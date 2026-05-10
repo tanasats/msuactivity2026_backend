@@ -458,6 +458,55 @@ export async function setActivityStatus(id, newStatus, actorId) {
   }
 }
 
+// super_admin override: เปลี่ยน owner ของกิจกรรม (created_by)
+//   ใช้กรณี: เจ้าของเดิมลาออก/ย้ายคณะ ต้องโอนความเป็นเจ้าของให้คนใหม่
+//   constraint: ผู้รับโอนต้องเป็น role ที่ "สร้างกิจกรรมได้จริง" — faculty_staff / admin / super_admin
+//   ไม่อนุญาต student (ไม่มีสิทธิ์สร้าง), staff (ยังไม่ provision), executive (read-only)
+//   คืน:
+//     null                                ถ้าไม่พบ activity
+//     { ok: false, reason: 'USER_NOT_FOUND' | 'INVALID_ROLE' | 'USER_DISABLED' }
+//     { ok: true, activity }
+const ALLOWED_CREATOR_ROLES = new Set(['faculty_staff', 'admin', 'super_admin']);
+
+export async function setActivityCreator(id, newCreatorId) {
+  // validate target user
+  const { rows: userRows } = await query(
+    `SELECT id, full_name, email, role, status FROM users WHERE id = $1`,
+    [newCreatorId],
+  );
+  if (userRows.length === 0) return { ok: false, reason: 'USER_NOT_FOUND' };
+  const u = userRows[0];
+  if (u.status !== 'active') return { ok: false, reason: 'USER_DISABLED' };
+  if (!ALLOWED_CREATOR_ROLES.has(u.role)) {
+    return { ok: false, reason: 'INVALID_ROLE' };
+  }
+
+  // ตรวจ activity มีอยู่จริงก่อนอัปเดต — แยก query เพื่อ error message ชัด
+  const { rows: actRows } = await query(
+    `SELECT id, created_by FROM activities WHERE id = $1`,
+    [id],
+  );
+  if (actRows.length === 0) return null;
+
+  // no-op ถ้า creator คนเดิม
+  if (actRows[0].created_by === newCreatorId) {
+    return { ok: true, activity: { id, created_by: newCreatorId, created_by_name: u.full_name } };
+  }
+
+  const { rows } = await query(
+    `UPDATE activities
+        SET created_by = $2,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING id, created_by, updated_at`,
+    [id, newCreatorId],
+  );
+  return {
+    ok: true,
+    activity: { ...rows[0], created_by_name: u.full_name, created_by_email: u.email },
+  };
+}
+
 // bulk reject: ทุกตัวใช้ reason เดียวกัน → กลับเป็น DRAFT
 export async function bulkRejectActivities(ids, reason) {
   if (ids.length === 0) return { rejected: [], skipped: [] };

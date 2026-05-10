@@ -12,7 +12,7 @@ import * as refreshTokens from '../models/refresh-token.model.js';
 
 const REFRESH_COOKIE = 'rt';
 const STATE_COOKIE = 'oauth_state';
-const REFRESH_TTL_MS = ttlToMs(process.env.JWT_REFRESH_TTL || '30d');
+const REFRESH_TTL_MS = ttlToMs(process.env.JWT_REFRESH_TTL || '7d');
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const cookieBase = {
@@ -78,7 +78,7 @@ export async function googleCallback(req, res) {
   let user = await users.findByEmail(profile.email);
   if (!user) {
     // ทุกคนที่ login ผ่าน Google Workspace @msu.ac.th ได้จะถูก provision อัตโนมัติ:
-    //   - email รูปแบบรหัสนิสิต 11 หลัก → role=student (สิทธิ์ใช้งานครบ)
+    //   - email รูปแบบรหัสนิสิต 11 หลัก   → role=student (สิทธิ์ใช้งานครบ)
     //   - email อื่นๆ                   → role=staff (default ไม่มีสิทธิ์, รอยกระดับโดย admin)
     const role = users.detectRoleFromEmail(profile.email);
     const msuId = users.extractMsuId(profile.email);
@@ -106,8 +106,9 @@ export async function googleCallback(req, res) {
       picture_url: profile.picture_url,
     });
   } else {
-    // sync google_sub + picture เผื่อเปลี่ยน (ผู้ใช้เปลี่ยนรูปโปรไฟล์ Google)
+    // sync name + google_sub + picture เผื่อเปลี่ยน (ผู้ใช้เปลี่ยนรูปโปรไฟล์ Google)
     await users.updateGoogleProfile(user.id, {
+      full_name: profile.name,
       google_sub: profile.google_sub,
       picture_url: profile.picture_url,
     });
