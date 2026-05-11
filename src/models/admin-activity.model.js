@@ -394,6 +394,49 @@ export async function bulkApproveActivities(ids, approverId) {
   return { approved, skipped };
 }
 
+// admin/super_admin override: แก้ field สำคัญของกิจกรรมได้ "ทุกคณะ, ทุก status"
+//   (ข้ามการตรวจ ownership + status ที่ /faculty มีอยู่)
+//   field ที่ยอมให้แก้: title, description, location, capacity, hours, loan_hours,
+//                       start_at, end_at, registration_open_at, registration_close_at
+//   ไม่อนุญาตแก้: status, code, organization_id, category_id, faculty_id, created_by
+//                 (เปลี่ยน status ใช้ setActivityStatus / เปลี่ยนเจ้าของใช้ setActivityCreator)
+const ADMIN_EDITABLE_FIELDS = [
+  'title',
+  'description',
+  'location',
+  'capacity',
+  'hours',
+  'loan_hours',
+  'start_at',
+  'end_at',
+  'registration_open_at',
+  'registration_close_at',
+];
+
+export const ADMIN_EDIT_FIELDS = Object.freeze(ADMIN_EDITABLE_FIELDS.slice());
+
+export async function adminEditActivity(id, payload) {
+  const sets = [];
+  const values = [id];
+  for (const f of ADMIN_EDITABLE_FIELDS) {
+    if (payload[f] === undefined) continue;
+    values.push(payload[f]);
+    sets.push(`${f} = $${values.length}`);
+  }
+  if (sets.length === 0) {
+    // no fields = no-op; คืน row ปัจจุบัน
+    return findById(id);
+  }
+  const { rows } = await query(
+    `UPDATE activities
+        SET ${sets.join(', ')}, updated_at = now()
+      WHERE id = $1
+      RETURNING id`,
+    values,
+  );
+  return rows[0] ? findById(id) : null;
+}
+
 // super_admin override: บังคับเปลี่ยน status ไปค่าใดก็ได้ (ข้าม state machine)
 //   ใช้กรณี recovery / แก้ผิดที่ flow ปกติทำไม่ได้ เช่น WORK → DRAFT, COMPLETED → WORK
 //   side effects ที่เก็บข้อมูลให้สอดคล้อง:

@@ -1,5 +1,10 @@
 import * as model from '../models/admin-student.model.js';
 import { findById as findUser } from '../models/user-admin.model.js';
+import {
+  createActivityAuditLog,
+  auditMetaFromReq,
+  ACTIVITY_AUDIT_ACTIONS as AUDIT,
+} from '../models/activity-audit.model.js';
 import { rowsToCsv, sendCsv } from '../utils/csv.js';
 
 const DEFAULT_LIMIT = 50;
@@ -208,6 +213,43 @@ const CROSS_CSV_COLS = [
 
 // limit สูงกว่า list (CSV เป็น "ดึงไปวิเคราะห์")
 const CSV_HARD_LIMIT = 10000;
+
+// POST /api/admin/registrations/:id/cancel
+//   body: { reason: string }
+//   ใช้ตอน admin ต้องยกเลิกการลงทะเบียนของนิสิต (ข้าม faculty scope)
+//   - บันทึก activity_audit_logs (action=cancel_registration) เพื่อทราบใครสั่ง
+export async function cancelRegistration(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const reasonRaw = req.body?.reason;
+  if (typeof reasonRaw !== 'string' || reasonRaw.trim().length === 0) {
+    return err(res, 400, 'ต้องระบุเหตุผลในการยกเลิก');
+  }
+  const reason = reasonRaw.trim().slice(0, 1000);
+
+  const result = await model.adminCancelRegistration(id, req.user.id, reason);
+  if (!result.ok) {
+    if (result.reason === 'NOT_FOUND') return err(res, 404, 'registration not found');
+    return err(
+      res,
+      409,
+      `ยกเลิกไม่ได้ — สถานะปัจจุบัน ${result.currentStatus} ไม่ใช่ active`,
+    );
+  }
+
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: result.activity_id,
+    action: AUDIT.CANCEL_REGISTRATION,
+    before: { registration_id: id, status: result.previous_status, user_id: result.user_id },
+    after: { registration_id: id, status: 'CANCELLED_BY_STAFF' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', registration_id: id });
+}
 
 export async function registrationsCsv(req, res) {
   const parsed = parseRegistrationsFilters(req.query);

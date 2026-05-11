@@ -1,4 +1,4 @@
-import { query } from '../db/index.js';
+import { pool, query } from '../db/index.js';
 
 // admin/super_admin: ตรวจสอบ/ติดตามข้อมูลการเข้าร่วมกิจกรรมของนิสิต
 //   - drill-down: list students + stats → student detail → student's registrations
@@ -166,6 +166,68 @@ export async function listStudentRegistrations(userId) {
     [userId],
   );
   return rows;
+}
+
+// admin/super_admin ยกเลิกการลงทะเบียนได้ — bypass scope ของ faculty
+//   - เปลี่ยน status → CANCELLED_BY_STAFF, บันทึก cancelled_at/by + cancel_reason
+//   - คืน slot ใน activities.registered_count (ลด 1, GREATEST(...,0) กัน negative)
+//   - "yank" ได้ทุก status ที่ active: PENDING_APPROVAL | REGISTERED | ATTENDED
+//     (ATTENDED — admin override, สอดคล้อง use case "นิสิตขอลบเข้าร่วม")
+//   คืน { ok, activity_id } | { ok: false, reason: 'NOT_FOUND' | 'ALREADY_CANCELLED' }
+const ADMIN_CANCELABLE = new Set([
+  'PENDING_APPROVAL',
+  'REGISTERED',
+  'ATTENDED',
+]);
+
+export async function adminCancelRegistration(registrationId, actorId, reason) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cur } = await client.query(
+      `SELECT id, status, activity_id, user_id FROM registrations
+        WHERE id = $1 FOR UPDATE`,
+      [registrationId],
+    );
+    if (cur.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'NOT_FOUND' };
+    }
+    if (!ADMIN_CANCELABLE.has(cur[0].status)) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'ALREADY_CANCELLED', currentStatus: cur[0].status };
+    }
+    const before = cur[0];
+    await client.query(
+      `UPDATE registrations
+          SET status        = 'CANCELLED_BY_STAFF',
+              cancelled_at  = now(),
+              cancelled_by  = $2,
+              cancel_reason = $3,
+              updated_at    = now()
+        WHERE id = $1`,
+      [registrationId, actorId, reason],
+    );
+    // คืน slot
+    await client.query(
+      `UPDATE activities
+          SET registered_count = GREATEST(registered_count - 1, 0)
+        WHERE id = $1`,
+      [before.activity_id],
+    );
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      activity_id: before.activity_id,
+      user_id: before.user_id,
+      previous_status: before.status,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // cross-browse: list registrations ทุกคน + filters (ใช้ทั้ง browse และ CSV)

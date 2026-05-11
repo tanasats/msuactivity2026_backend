@@ -1,4 +1,10 @@
 import * as activities from '../models/admin-activity.model.js';
+import {
+  createActivityAuditLog,
+  auditMetaFromReq,
+  listAuditForActivity,
+  ACTIVITY_AUDIT_ACTIONS as AUDIT,
+} from '../models/activity-audit.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
 
@@ -112,6 +118,20 @@ export async function list(req, res) {
   });
 }
 
+// GET /api/admin/activities/:id/audit
+//   timeline ของการเปลี่ยนแปลงสำคัญ (approve/reject/setStatus/setCreator/submit/complete/edit/cancel-reg)
+export async function auditLog(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  // ตรวจ activity exists ก่อน — ป้องกันการ probe id ที่ไม่มี
+  const exists = await activities.findById(id);
+  if (!exists) return err(res, 404, 'activity not found');
+
+  const items = await listAuditForActivity(id, { limit: 200 });
+  res.json({ items });
+}
+
 // GET /api/admin/activities/:id
 export async function detail(req, res) {
   const id = Number(req.params.id);
@@ -141,6 +161,13 @@ export async function approve(req, res) {
       'รหัสกิจกรรมในกลุ่ม (หน่วยงาน × ปีการศึกษา × ภาค × ประเภท) เต็ม (เกิน 100) — โปรดแจ้ง super_admin',
     );
   }
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.APPROVE,
+    after: { status: 'WORK', code: result.code },
+    ...auditMetaFromReq(req),
+  });
   res.json({ status: 'ok', activity: result });
 }
 
@@ -166,6 +193,19 @@ export async function bulkApprove(req, res) {
   if (ids.length > 200) return err(res, 400, 'อนุมัติได้ไม่เกิน 200 รายการต่อครั้ง');
 
   const out = await activities.bulkApproveActivities(ids, req.user.id);
+  // log audit ทีละกิจกรรมที่ approve สำเร็จ
+  const meta = auditMetaFromReq(req);
+  await Promise.all(
+    out.approved.map((id) =>
+      createActivityAuditLog({
+        actor_id: req.user.id,
+        activity_id: id,
+        action: AUDIT.BULK_APPROVE,
+        after: { status: 'WORK' },
+        ...meta,
+      }),
+    ),
+  );
   res.json({ status: 'ok', ...out });
 }
 
@@ -184,6 +224,19 @@ export async function bulkReject(req, res) {
   const reason = reasonRaw.trim().slice(0, 1000);
 
   const out = await activities.bulkRejectActivities(ids, reason);
+  const meta = auditMetaFromReq(req);
+  await Promise.all(
+    out.rejected.map((id) =>
+      createActivityAuditLog({
+        actor_id: req.user.id,
+        activity_id: id,
+        action: AUDIT.BULK_REJECT,
+        after: { status: 'DRAFT' },
+        note: reason,
+        ...meta,
+      }),
+    ),
+  );
   res.json({ status: 'ok', ...out });
 }
 
@@ -202,6 +255,10 @@ export async function setStatus(req, res) {
     );
   }
 
+  // เก็บ before-state ก่อน update เพื่อ audit
+  const before = await activities.findById(id);
+  if (!before) return err(res, 404, 'activity not found');
+
   const result = await activities.setActivityStatus(id, status, req.user.id);
   if (!result) return err(res, 404, 'activity not found');
   if (result.full) {
@@ -211,6 +268,19 @@ export async function setStatus(req, res) {
       'รหัสกิจกรรมในกลุ่ม (หน่วยงาน × ปีการศึกษา × ภาค × ประเภท) เต็ม (เกิน 100) — ไม่สามารถสร้าง code ใหม่ได้',
     );
   }
+
+  // log เฉพาะกรณีที่ status เปลี่ยนจริง
+  if (before.status !== status) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: id,
+      action: AUDIT.SET_STATUS,
+      before: { status: before.status, code: before.code },
+      after: { status: result.activity.status, code: result.activity.code, code_assigned: result.codeAssigned },
+      ...auditMetaFromReq(req),
+    });
+  }
+
   res.json({ status: 'ok', activity: result.activity, code_assigned: result.codeAssigned });
 }
 
@@ -225,6 +295,8 @@ export async function setCreator(req, res) {
     return err(res, 400, 'created_by ต้องเป็น integer ≥ 1');
   }
 
+  // เก็บ before-state ก่อน update เพื่อ audit
+  const before = await activities.findById(id);
   const result = await activities.setActivityCreator(id, newCreatorId);
   if (result === null) return err(res, 404, 'activity not found');
   if (!result.ok) {
@@ -240,7 +312,130 @@ export async function setCreator(req, res) {
       );
     return err(res, 400, 'เปลี่ยนผู้สร้างไม่สำเร็จ');
   }
+
+  if (before && before.created_by !== newCreatorId) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: id,
+      action: AUDIT.SET_CREATOR,
+      before: { created_by: before.created_by, created_by_name: before.created_by_name },
+      after: { created_by: result.activity.created_by, created_by_name: result.activity.created_by_name },
+      ...auditMetaFromReq(req),
+    });
+  }
+
   res.json({ status: 'ok', activity: result.activity });
+}
+
+// PATCH /api/admin/activities/:id — admin/super_admin override edit
+//   ฟิลด์ที่อนุญาต (subset): title, description, location, capacity, hours,
+//                            loan_hours, start_at, end_at, registration_open_at,
+//                            registration_close_at
+//   ไม่ตรวจ ownership / status — admin/super_admin แก้ทุกคณะ ทุกสถานะได้
+//   จะ log เป็น 'edit_admin' พร้อม before/after diff
+const ADMIN_EDIT_VALIDATORS = {
+  title: (v) =>
+    typeof v === 'string' && v.trim().length > 0 && v.length <= 500
+      ? { ok: true, value: v.trim() }
+      : { ok: false, message: 'title ต้องเป็น string ความยาว 1–500' },
+  description: (v) =>
+    typeof v === 'string' && v.length <= 10000
+      ? { ok: true, value: v }
+      : { ok: false, message: 'description ต้องเป็น string ≤ 10000' },
+  location: (v) =>
+    typeof v === 'string' && v.length <= 500
+      ? { ok: true, value: v }
+      : { ok: false, message: 'location ต้องเป็น string ≤ 500' },
+  capacity: (v) =>
+    Number.isInteger(v) && v >= 1
+      ? { ok: true, value: v }
+      : { ok: false, message: 'capacity ต้องเป็น integer ≥ 1' },
+  hours: (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return { ok: false, message: 'hours ≥ 0' };
+    return { ok: true, value: Math.round(n * 10) / 10 };
+  },
+  loan_hours: (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0)
+      return { ok: false, message: 'loan_hours ≥ 0' };
+    return { ok: true, value: Math.round(n * 10) / 10 };
+  },
+  start_at: (v) => parseDateLike(v, 'start_at'),
+  end_at: (v) => parseDateLike(v, 'end_at'),
+  registration_open_at: (v) => parseDateLike(v, 'registration_open_at'),
+  registration_close_at: (v) => parseDateLike(v, 'registration_close_at'),
+};
+
+function parseDateLike(v, label) {
+  if (v === null || v === undefined) return { ok: false, message: `${label} ต้องมีค่า` };
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? { ok: false, message: `${label} ไม่ใช่วันที่ที่ถูกต้อง` }
+    : { ok: true, value: d.toISOString() };
+}
+
+export async function adminEdit(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const before = await activities.findById(id);
+  if (!before) return err(res, 404, 'activity not found');
+
+  // เก็บเฉพาะ field ที่ส่งมา + ผ่าน validator
+  const payload = {};
+  const beforeSnapshot = {};
+  const afterSnapshot = {};
+  for (const [key, validator] of Object.entries(ADMIN_EDIT_VALIDATORS)) {
+    if (req.body?.[key] === undefined) continue;
+    const v = validator(req.body[key]);
+    if (!v.ok) return err(res, 400, v.message);
+    payload[key] = v.value;
+    beforeSnapshot[key] = before[key];
+    afterSnapshot[key] = v.value;
+  }
+
+  // ตรวจช่วงเวลาให้สมเหตุสมผล (ถ้าส่งคู่กัน)
+  const finalStart = payload.start_at ?? before.start_at;
+  const finalEnd = payload.end_at ?? before.end_at;
+  if (new Date(finalStart) >= new Date(finalEnd))
+    return err(res, 400, 'start_at ต้องน้อยกว่า end_at');
+  const finalRegOpen = payload.registration_open_at ?? before.registration_open_at;
+  const finalRegClose = payload.registration_close_at ?? before.registration_close_at;
+  if (new Date(finalRegOpen) >= new Date(finalRegClose))
+    return err(res, 400, 'registration_open_at ต้องน้อยกว่า registration_close_at');
+
+  if (Object.keys(payload).length === 0) {
+    return res.json({ status: 'ok', activity: before, changed: false });
+  }
+
+  // ตรวจ capacity ใหม่ต้อง >= registered_count
+  if (payload.capacity !== undefined && payload.capacity < before.registered_count) {
+    return err(
+      res,
+      409,
+      `capacity ใหม่ (${payload.capacity}) ต้อง ≥ จำนวนผู้สมัครปัจจุบัน (${before.registered_count})`,
+    );
+  }
+
+  const updated = await activities.adminEditActivity(id, payload);
+
+  // skip field ที่ค่าไม่เปลี่ยน (กัน log noise)
+  const changedFields = Object.keys(payload).filter(
+    (k) => String(beforeSnapshot[k]) !== String(afterSnapshot[k]),
+  );
+  if (changedFields.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: id,
+      action: AUDIT.EDIT_ADMIN,
+      before: Object.fromEntries(changedFields.map((k) => [k, beforeSnapshot[k]])),
+      after: Object.fromEntries(changedFields.map((k) => [k, afterSnapshot[k]])),
+      ...auditMetaFromReq(req),
+    });
+  }
+
+  res.json({ status: 'ok', activity: updated, changed_fields: changedFields });
 }
 
 // POST /api/admin/activities/:id/reject
@@ -263,5 +458,13 @@ export async function reject(req, res) {
       'ไม่อนุมัติได้เฉพาะกิจกรรมที่อยู่ในสถานะ "รออนุมัติ"',
     );
   }
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.REJECT,
+    after: { status: 'DRAFT' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
   res.json({ status: 'ok', activity: result });
 }

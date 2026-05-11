@@ -3,7 +3,9 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { requireAuth, requireRole } from '../middlewares/auth.middleware.js';
 import {
   academicYears,
+  adminEdit,
   approve,
+  auditLog,
   bulkApprove,
   bulkReject,
   detail,
@@ -30,6 +32,7 @@ import {
   studentRegistrationsCsv,
   listRegistrations,
   registrationsCsv,
+  cancelRegistration as adminCancelRegistration,
 } from '../controllers/admin-student.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
@@ -44,6 +47,8 @@ router.get('/activities', asyncHandler(list));
 router.post('/activities/bulk-approve', asyncHandler(bulkApprove));
 router.post('/activities/bulk-reject', asyncHandler(bulkReject));
 router.get('/activities/:id', asyncHandler(detail));
+router.get('/activities/:id/audit', asyncHandler(auditLog));
+router.patch('/activities/:id', asyncHandler(adminEdit));
 router.post('/activities/:id/approve', asyncHandler(approve));
 router.post('/activities/:id/reject', asyncHandler(reject));
 // per-route guard: super_admin only — override state machine
@@ -78,6 +83,10 @@ router.get('/students/:id', asyncHandler(studentDetail));
 router.get('/students/:id/registrations.csv', asyncHandler(studentRegistrationsCsv));
 router.get('/registrations', asyncHandler(listRegistrations));
 router.get('/registrations.csv', asyncHandler(registrationsCsv));
+router.post(
+  '/registrations/:id/cancel',
+  asyncHandler(adminCancelRegistration),
+);
 
 // announcements — admin + super_admin จัดการ (อ่านบน public endpoint)
 router.get('/announcements', asyncHandler(listAnnouncements));

@@ -1,4 +1,9 @@
 import * as activities from '../models/faculty-activity.model.js';
+import {
+  createActivityAuditLog,
+  auditMetaFromReq,
+  ACTIVITY_AUDIT_ACTIONS as AUDIT,
+} from '../models/activity-audit.model.js';
 import { deleteObject, getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
 
@@ -595,6 +600,14 @@ export async function submit(req, res) {
       `สถานะ ${existing.status} ไม่อนุญาตให้ส่งอนุมัติ (ต้องเป็น DRAFT)`,
     );
   }
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.SUBMIT,
+    before: { status: 'DRAFT' },
+    after: { status: 'PENDING_APPROVAL' },
+    ...auditMetaFromReq(req),
+  });
   const updated = await decoratePoster(await activities.findById(id));
   res.json({
     ...updated,
@@ -632,6 +645,14 @@ export async function complete(req, res) {
       'สถานะกิจกรรมเปลี่ยนระหว่างทำงาน — โหลดหน้าใหม่แล้วลองอีกครั้ง',
     );
   }
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.COMPLETE,
+    before: { status: 'WORK' },
+    after: { status: 'COMPLETED' },
+    ...auditMetaFromReq(req),
+  });
 
   const updated = await decoratePoster(await activities.findById(id));
   res.json({
