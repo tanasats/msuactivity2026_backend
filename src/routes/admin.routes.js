@@ -24,6 +24,13 @@ import {
   update as updateAnnouncement,
   remove as removeAnnouncement,
 } from '../controllers/announcement.controller.js';
+import {
+  listStudents,
+  studentDetail,
+  studentRegistrationsCsv,
+  listRegistrations,
+  registrationsCsv,
+} from '../controllers/admin-student.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -59,6 +66,18 @@ router.put(
   requireRole('super_admin'),
   asyncHandler(updateSetting),
 );
+
+// student participation tracking — admin + super_admin
+//   - /students         : list นิสิต + summary stats (drill-down entry)
+//   - /students/:id     : profile + aggregate stats + ทุก registration
+//   - /students/:id/registrations.csv  : export ของนิสิตคนนั้น
+//   - /registrations    : cross-browse registrations ข้ามนิสิต+กิจกรรม
+//   - /registrations.csv: export ผลตาม filter
+router.get('/students', asyncHandler(listStudents));
+router.get('/students/:id', asyncHandler(studentDetail));
+router.get('/students/:id/registrations.csv', asyncHandler(studentRegistrationsCsv));
+router.get('/registrations', asyncHandler(listRegistrations));
+router.get('/registrations.csv', asyncHandler(registrationsCsv));
 
 // announcements — admin + super_admin จัดการ (อ่านบน public endpoint)
 router.get('/announcements', asyncHandler(listAnnouncements));
