@@ -411,6 +411,9 @@ const ADMIN_EDITABLE_FIELDS = [
   'end_at',
   'registration_open_at',
   'registration_close_at',
+  // check-in window: nullable — null = ใช้ default จาก system_settings
+  'check_in_opens_at',
+  'check_in_closes_at',
 ];
 
 export const ADMIN_EDIT_FIELDS = Object.freeze(ADMIN_EDITABLE_FIELDS.slice());
