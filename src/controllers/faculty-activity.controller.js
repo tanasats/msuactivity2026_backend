@@ -63,17 +63,18 @@ export async function stats(req, res) {
 }
 
 // GET /api/faculty/academic-years
-//   คืน { current, available } ใช้ populate dropdown filter
-//     current   = ปีการศึกษาปัจจุบัน (คำนวณจากวันที่)
-//     available = ปีทั้งหมดที่มี activity ในคณะ + รวม current เผื่อยังไม่มี activity ปีนี้
+//   คืน { current, default_year, available } ใช้ populate dropdown filter
+//     default_year = max ของปีที่คณะมี activity (กันเคสคณะสร้างกิจกรรมในปีถัดไปแล้ว
+//                    แต่ dashboard default เป็นปีปัจจุบัน → ไม่เห็น)
 export async function academicYears(req, res) {
   if (!requireFaculty(req, res)) return;
   const current = getCurrentAcademicYearBE();
   const fromDb = await activities.listAcademicYearsByFaculty(req.user.faculty_id);
+  const default_year = fromDb.length > 0 ? fromDb[0] : current;
   const set = new Set(fromDb);
   set.add(current);
   const available = [...set].sort((a, b) => b - a);
-  res.json({ current, available });
+  res.json({ current, default_year, available });
 }
 
 export async function list(req, res) {

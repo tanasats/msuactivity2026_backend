@@ -61,16 +61,21 @@ export async function stats(req, res) {
 }
 
 // GET /api/student/academic-years
-//   คืน { current, available } ใช้ populate dropdown filter
-//     current   = ปีการศึกษาปัจจุบัน (คำนวณจากวันที่)
-//     available = ปีทั้งหมดที่นิสิตเคยมี registration + รวม current เผื่อยังไม่มีปีนี้
+//   คืน { current, default_year, available } ใช้ populate dropdown filter
+//     current      = ปีการศึกษาปัจจุบัน (คำนวณจากวันที่)
+//     default_year = ปีที่ควร default ไป — max ของปีที่นิสิตมีข้อมูล
+//                    (กันเคสกิจกรรมในปีถัดไปที่นิสิตเพิ่งสมัคร แต่ปีปัจจุบันยังไม่ถึง)
+//                    ถ้าไม่มี registration เลย fallback เป็น current
+//     available    = ปีทั้งหมดที่นิสิตเคยมี registration + รวม current เผื่อยังไม่มีปีนี้
 export async function academicYears(req, res) {
   const current = getCurrentAcademicYearBE();
   const fromDb = await listMyAcademicYears(req.user.id);
+  // listMyAcademicYears คืนค่าเรียง DESC อยู่แล้ว → fromDb[0] = max
+  const default_year = fromDb.length > 0 ? fromDb[0] : current;
   const set = new Set(fromDb);
   set.add(current);
   const available = [...set].sort((a, b) => b - a);
-  res.json({ current, available });
+  res.json({ current, default_year, available });
 }
 
 export async function cancel(req, res) {

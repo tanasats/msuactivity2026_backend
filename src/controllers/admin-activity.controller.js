@@ -67,13 +67,16 @@ export async function stats(req, res) {
 }
 
 // GET /api/admin/academic-years
+//   default_year = max ของปีที่ระบบมี activity (กันเคสปีปัจจุบันยังไม่มีกิจกรรม
+//                  แต่มีในปีอื่น → admin overview ขึ้น empty)
 export async function academicYears(req, res) {
   const current = getCurrentAcademicYearBE();
   const fromDb = await activities.listAllAcademicYears();
+  const default_year = fromDb.length > 0 ? fromDb[0] : current;
   const set = new Set(fromDb);
   set.add(current);
   const available = [...set].sort((a, b) => b - a);
-  res.json({ current, available });
+  res.json({ current, default_year, available });
 }
 
 // GET /api/admin/activities?status=&faculty_id=&academic_year=&search=&limit=&offset=
