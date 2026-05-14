@@ -2,13 +2,20 @@ import {
   approveRegistration,
   bulkAddByMsuIds,
   bulkEvaluateRegistrations,
+  bulkUpdateParticipantRole,
   cancelByStaff,
   evaluateRegistration,
   findRegistrationWithActivity,
+  isValidParticipantRole,
   listByActivity,
   staffCheckInBulk,
 } from '../models/faculty-registration.model.js';
 import { findById as findActivity } from '../models/faculty-activity.model.js';
+import {
+  createActivityAuditLog,
+  auditMetaFromReq,
+  ACTIVITY_AUDIT_ACTIONS as AUDIT,
+} from '../models/activity-audit.model.js';
 
 const EVALUATION_RESULTS = new Set(['PASSED', 'FAILED']);
 
@@ -78,6 +85,13 @@ export async function approve(req, res) {
   if (!ctx) return;
   const result = await approveRegistration(ctx.regId, req.user.id);
   if (!result) return err(res, 409, 'อนุมัติไม่สำเร็จ');
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: ctx.reg.activity_id,
+    action: AUDIT.APPROVE_REGISTRATION,
+    after: { registration_id: ctx.regId, user_id: ctx.reg.user_id },
+    ...auditMetaFromReq(req),
+  });
   res.json({ status: 'ok', registration: result });
 }
 
@@ -92,6 +106,15 @@ export async function cancel(req, res) {
     typeof req.body?.reason === 'string' ? req.body.reason.trim() || null : null;
   const result = await cancelByStaff(ctx.regId, req.user.id, reason);
   if (!result) return err(res, 409, 'ยกเลิกไม่สำเร็จ');
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: ctx.reg.activity_id,
+    action: AUDIT.CANCEL_REGISTRATION,
+    before: { status: ctx.reg.status },
+    after: { registration_id: ctx.regId, user_id: ctx.reg.user_id, reason },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
   res.json({ status: 'ok', registration: result });
 }
 
@@ -120,6 +143,18 @@ export async function evaluate(req, res) {
     note,
   );
   if (!updated) return err(res, 409, 'บันทึกผลประเมินไม่สำเร็จ');
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: ctx.reg.activity_id,
+    action: AUDIT.EVALUATE_REGISTRATION,
+    after: {
+      registration_id: ctx.regId,
+      user_id: ctx.reg.user_id,
+      result,
+      note,
+    },
+    ...auditMetaFromReq(req),
+  });
   res.json({ status: 'ok', registration: updated });
 }
 
@@ -162,6 +197,19 @@ export async function staffCheckIn(req, res) {
     registrationIds: regIds,
     staffId: req.user.id,
   });
+  if (out.checkedIn.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: activityId,
+      action: AUDIT.STAFF_CHECK_IN,
+      after: {
+        count: out.checkedIn.length,
+        registration_ids: out.checkedIn,
+      },
+      note: `staff check-in ${out.checkedIn.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+  }
   res.json({
     status: 'ok',
     checked_in: out.checkedIn,
@@ -217,6 +265,16 @@ export async function bulkEvaluate(req, res) {
     result,
     note,
   });
+  if (out.updated.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: activityId,
+      action: AUDIT.BULK_EVALUATE_REGISTRATION,
+      after: { result, count: out.updated.length, registration_ids: out.updated },
+      note: note ?? `bulk evaluate ${result} ${out.updated.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+  }
   res.json({ status: 'ok', ...out });
 }
 
@@ -250,5 +308,79 @@ export async function bulkAdd(req, res) {
     return err(res, 400, 'เพิ่มได้ไม่เกิน 200 รายชื่อต่อครั้ง');
 
   const result = await bulkAddByMsuIds(activityId, msuIds, req.user.id);
+  if (result.added?.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: activityId,
+      action: AUDIT.BULK_ADD_REGISTRATION,
+      after: {
+        count: result.added.length,
+        msu_ids: result.added.map((r) => r.msu_id),
+        registration_ids: result.added.map((r) => r.registration_id),
+      },
+      note: `bulk add ${result.added.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+  }
   res.status(201).json({ status: 'ok', ...result });
+}
+
+// POST /api/faculty/activities/:id/registrations/bulk-participant-role
+// body: { registration_ids: number[], role: 'PARTICIPANT'|'ORGANIZER'|'LEADER' }
+//   scope: ผู้สร้างกิจกรรมเท่านั้น
+//   logic: bulk set participant_role; skip ของที่ status ไม่ active
+export async function bulkParticipantRole(req, res) {
+  if (!req.user.faculty_id) return err(res, 403, 'บัญชีของท่านยังไม่ถูกผูกกับคณะ');
+
+  const activityId = Number(req.params.id);
+  if (!Number.isInteger(activityId) || activityId < 1)
+    return err(res, 400, 'invalid activity id');
+
+  const activity = await findActivity(activityId);
+  if (!activity) return err(res, 404, 'activity not found');
+  if (activity.created_by !== req.user.id)
+    return err(res, 403, 'จัดการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
+
+  const role = req.body?.role;
+  if (!isValidParticipantRole(role)) {
+    return err(res, 400, 'role ต้องเป็น PARTICIPANT / ORGANIZER / LEADER');
+  }
+
+  const rawIds = Array.isArray(req.body?.registration_ids)
+    ? req.body.registration_ids
+    : null;
+  if (!rawIds) return err(res, 400, 'ต้องส่ง registration_ids เป็น array');
+  const regIds = [
+    ...new Set(
+      rawIds
+        .map((v) => Number(v))
+        .filter((v) => Number.isInteger(v) && v > 0),
+    ),
+  ];
+  if (regIds.length === 0) return err(res, 400, 'ไม่มี registration_id ที่ valid');
+  if (regIds.length > 500)
+    return err(res, 400, 'เปลี่ยนสถานภาพได้ไม่เกิน 500 รายชื่อต่อครั้ง');
+
+  const out = await bulkUpdateParticipantRole({
+    activityId,
+    registrationIds: regIds,
+    role,
+  });
+
+  if (out.updated.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: activityId,
+      action: AUDIT.CHANGE_PARTICIPANT_ROLE,
+      after: {
+        role,
+        count: out.updated.length,
+        registration_ids: out.updated,
+      },
+      note: `set ${role} ให้ ${out.updated.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+  }
+
+  res.json({ status: 'ok', ...out });
 }

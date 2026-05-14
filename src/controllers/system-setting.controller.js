@@ -1,4 +1,10 @@
 import * as settings from '../models/system-setting.model.js';
+import {
+  createMasterDataAuditLog,
+  MASTER_AUDIT_TARGETS,
+  MASTER_AUDIT_ACTIONS,
+} from '../models/master-data-audit.model.js';
+import { auditMetaFromReq } from '../models/activity-audit.model.js';
 
 function err(res, status, message) {
   return res.status(status).json({ status: 'error', message });
@@ -67,7 +73,21 @@ export async function update(req, res) {
   const v = validateValue(schema, req.body?.value);
   if (!v.ok) return err(res, 400, `value ${v.message}`);
 
+  const before = await settings.getSetting(key);
   const saved = await settings.upsertSetting(key, v.value, req.user.id);
+
+  // audit เฉพาะตอน value เปลี่ยนจริง (กัน noise จากการ save ค่าเดิม)
+  if (!before || before.value !== saved.value) {
+    await createMasterDataAuditLog({
+      actor_id: req.user.id,
+      target_type: MASTER_AUDIT_TARGETS.SYSTEM_SETTING,
+      target_key: key,
+      action: MASTER_AUDIT_ACTIONS.UPDATE,
+      before: { value: before?.value ?? null },
+      after: { value: saved.value },
+      ...auditMetaFromReq(req),
+    });
+  }
 
   // side effect — เช่น reload academic-year cache หลังเปลี่ยนค่า
   if (typeof schema.onSave === 'function') {

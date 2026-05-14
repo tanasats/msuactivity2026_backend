@@ -2,6 +2,8 @@ import {
   bulkAddByMsuIds,
   bulkApproveRegistrations,
   bulkEvaluateRegistrations,
+  bulkUpdateParticipantRole,
+  isValidParticipantRole,
   resolveMsuIdsToRegistrationIds,
 } from '../models/faculty-registration.model.js';
 import { findById as findActivity } from '../models/faculty-activity.model.js';
@@ -219,6 +221,73 @@ export async function bulkEvaluate(req, res) {
     status: 'ok',
     evaluated,
     skipped: out.skipped ?? [],
+    errors: resolved.errors,
+  });
+}
+
+// POST /api/admin/activities/:id/registrations/bulk-participant-role
+//   body: { msu_ids: string[], role: 'PARTICIPANT'|'ORGANIZER'|'LEADER' }
+//   admin + super_admin (cross-faculty); ใช้ msu_ids แทน registration_ids
+export async function bulkParticipantRole(req, res) {
+  const activity = await loadActivity(req, res);
+  if (!activity) return;
+
+  const role = req.body?.role;
+  if (!isValidParticipantRole(role)) {
+    return err(res, 400, 'role ต้องเป็น PARTICIPANT / ORGANIZER / LEADER');
+  }
+
+  const parsed = parseMsuIds(req.body?.msu_ids);
+  if (parsed.error) return err(res, 400, parsed.error);
+
+  // resolve msu_ids → registration_ids (allow active statuses)
+  const resolved = await resolveMsuIdsToRegistrationIds(
+    activity.id,
+    parsed.msuIds,
+    ['PENDING_APPROVAL', 'REGISTERED', 'ATTENDED', 'NO_SHOW'],
+  );
+  if (resolved.resolved.length === 0) {
+    return res.json({
+      status: 'ok',
+      updated: [],
+      skipped: [],
+      errors: resolved.errors,
+    });
+  }
+
+  const out = await bulkUpdateParticipantRole({
+    activityId: activity.id,
+    registrationIds: resolved.resolved.map((r) => r.registration_id),
+    role,
+  });
+
+  const idToMsuId = new Map(
+    resolved.resolved.map((r) => [r.registration_id, r.msu_id]),
+  );
+  const updated = out.updated.map((id) => ({
+    msu_id: idToMsuId.get(id),
+    registration_id: id,
+  }));
+
+  if (updated.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: activity.id,
+      action: AUDIT.CHANGE_PARTICIPANT_ROLE,
+      after: {
+        role,
+        count: updated.length,
+        msu_ids: updated.map((u) => u.msu_id),
+      },
+      note: `admin set ${role} ให้ ${updated.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+  }
+
+  res.json({
+    status: 'ok',
+    updated,
+    skipped: out.skipped,
     errors: resolved.errors,
   });
 }

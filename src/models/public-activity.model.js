@@ -105,11 +105,14 @@ export async function getPublicActivityDetail(id) {
 
   const [skillsRes, facultiesRes, posterRes, docsRes] = await Promise.all([
     query(
-      `SELECT s.id, s.code, s.name
+      `SELECT s.id, s.code, s.name,
+              s.parent_id,
+              p.code AS parent_code, p.name AS parent_name
          FROM activity_skills aks
-         JOIN skills s ON s.id = aks.skill_id
+         JOIN skills s      ON s.id = aks.skill_id
+         LEFT JOIN skills p ON p.id = s.parent_id
         WHERE aks.activity_id = $1
-        ORDER BY s.code`,
+        ORDER BY COALESCE(p.code, s.code), s.code`,
       [id],
     ),
     query(

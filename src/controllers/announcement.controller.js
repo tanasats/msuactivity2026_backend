@@ -1,4 +1,25 @@
 import * as ann from '../models/announcement.model.js';
+import {
+  createMasterDataAuditLog,
+  MASTER_AUDIT_TARGETS,
+  MASTER_AUDIT_ACTIONS,
+} from '../models/master-data-audit.model.js';
+import {
+  auditMetaFromReq,
+  buildDiff,
+} from '../models/activity-audit.model.js';
+
+const ANNOUNCEMENT_DIFF_FIELDS = [
+  'kind',
+  'severity',
+  'title',
+  'body',
+  'link_url',
+  'link_label',
+  'starts_at',
+  'ends_at',
+  'is_active',
+];
 
 const MAX_BODY = 4000;
 const MAX_TITLE = 200;
@@ -145,6 +166,21 @@ export async function create(req, res) {
   if (!v.ok) return err(res, 400, v.message);
   const id = await ann.createAnnouncement(v.value, req.user.id);
   const created = await ann.findById(id);
+  await createMasterDataAuditLog({
+    actor_id: req.user.id,
+    target_type: MASTER_AUDIT_TARGETS.ANNOUNCEMENT,
+    target_id: id,
+    action: MASTER_AUDIT_ACTIONS.CREATE,
+    after: {
+      kind: created.kind,
+      severity: created.severity,
+      title: created.title,
+      is_active: created.is_active,
+      starts_at: created.starts_at,
+      ends_at: created.ends_at,
+    },
+    ...auditMetaFromReq(req),
+  });
   res.status(201).json(created);
 }
 
@@ -159,6 +195,18 @@ export async function update(req, res) {
   if (!v.ok) return err(res, 400, v.message);
 
   const updated = await ann.updateAnnouncement(id, v.value, req.user.id);
+  const diff = buildDiff(existing, updated, ANNOUNCEMENT_DIFF_FIELDS);
+  if (diff) {
+    await createMasterDataAuditLog({
+      actor_id: req.user.id,
+      target_type: MASTER_AUDIT_TARGETS.ANNOUNCEMENT,
+      target_id: id,
+      action: MASTER_AUDIT_ACTIONS.UPDATE,
+      before: diff.before,
+      after: diff.after,
+      ...auditMetaFromReq(req),
+    });
+  }
   res.json(updated);
 }
 
@@ -166,7 +214,25 @@ export async function update(req, res) {
 export async function remove(req, res) {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+  // ดึง snapshot ก่อนลบ (audit จะคงอยู่แม้ row หาย — ไม่มี FK)
+  const before = await ann.findById(id);
   const deleted = await ann.deleteAnnouncement(id);
   if (!deleted) return err(res, 404, 'announcement not found');
+  await createMasterDataAuditLog({
+    actor_id: req.user.id,
+    target_type: MASTER_AUDIT_TARGETS.ANNOUNCEMENT,
+    target_id: id,
+    action: MASTER_AUDIT_ACTIONS.DELETE,
+    before: before
+      ? {
+          kind: before.kind,
+          severity: before.severity,
+          title: before.title,
+          body: before.body,
+          is_active: before.is_active,
+        }
+      : null,
+    ...auditMetaFromReq(req),
+  });
   res.status(204).end();
 }

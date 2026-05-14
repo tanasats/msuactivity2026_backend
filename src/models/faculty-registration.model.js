@@ -8,6 +8,7 @@ export async function listByActivity(activityId) {
   const { rows } = await query(
     `SELECT r.id              AS registration_id,
             r.status          AS registration_status,
+            r.participant_role,
             r.qr_token,
             r.registered_at,
             r.approved_at,
@@ -134,6 +135,41 @@ export async function evaluateRegistration(
     [registrationId, result, note ?? null, evaluatorId],
   );
   return rows[0] || null;
+}
+
+const VALID_PARTICIPANT_ROLES = Object.freeze([
+  'PARTICIPANT',
+  'ORGANIZER',
+  'LEADER',
+]);
+export function isValidParticipantRole(r) {
+  return VALID_PARTICIPANT_ROLES.includes(r);
+}
+
+// bulk update participant_role — set role ให้หลาย registration ในกิจกรรมเดียวกัน
+//   - filter activity_id กัน cross-activity smear
+//   - active statuses เท่านั้น (ไม่เปลี่ยนของที่ถูก cancel/reject แล้ว)
+//   - คืน { updated: id[], skipped: id[] }
+export async function bulkUpdateParticipantRole({
+  activityId,
+  registrationIds,
+  role,
+}) {
+  if (registrationIds.length === 0) return { updated: [], skipped: [] };
+  const { rows } = await query(
+    `UPDATE registrations
+        SET participant_role = $3::participant_role,
+            updated_at       = now()
+      WHERE id = ANY($2::int[])
+        AND activity_id = $1
+        AND status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED','NO_SHOW')
+      RETURNING id`,
+    [activityId, registrationIds, role],
+  );
+  const updated = rows.map((r) => r.id);
+  const updatedSet = new Set(updated);
+  const skipped = registrationIds.filter((id) => !updatedSet.has(id));
+  return { updated, skipped };
 }
 
 // bulk approve: หลาย registration ในกิจกรรมเดียวกัน (atomic ต่อ row)

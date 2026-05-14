@@ -1,11 +1,76 @@
 import * as activities from '../models/faculty-activity.model.js';
+import { findById as findFacultyById } from '../models/faculty.model.js';
+import { validateSkillIdsForYear } from '../models/skill.model.js';
 import {
   createActivityAuditLog,
   auditMetaFromReq,
+  buildDiff,
   ACTIVITY_AUDIT_ACTIONS as AUDIT,
 } from '../models/activity-audit.model.js';
+
+// field ที่ track diff เมื่อ faculty edit (full DRAFT mode)
+const FULL_EDIT_DIFF_FIELDS = [
+  'title',
+  'description',
+  'location',
+  'organization_id',
+  'category_id',
+  'academic_year',
+  'semester',
+  'hours',
+  'loan_hours',
+  'capacity',
+  'start_at',
+  'end_at',
+  'registration_open_at',
+  'registration_close_at',
+  'approval_mode',
+  'check_in_opens_at',
+  'check_in_closes_at',
+  'budget_source',
+  'budget_requested',
+  'budget_actual',
+  'skill_ids',
+  'eligible_faculty_ids',
+];
+
+// field ที่ track diff เมื่อ faculty edit (WORK mode — จำกัด)
+const LIMITED_EDIT_DIFF_FIELDS = [
+  'capacity',
+  'description',
+  'location',
+  'start_at',
+  'end_at',
+  'registration_open_at',
+  'registration_close_at',
+  'approval_mode',
+  'budget_actual',
+  'skill_ids',
+  'eligible_faculty_ids',
+];
+
+// normalize existing activity ให้พร้อม diff กับ payload — แปลง Date → ISO + m2m → id[]
+function existingForDiff(existing) {
+  const toIso = (v) =>
+    v instanceof Date ? v.toISOString() : v;
+  return {
+    ...existing,
+    start_at: toIso(existing.start_at),
+    end_at: toIso(existing.end_at),
+    registration_open_at: toIso(existing.registration_open_at),
+    registration_close_at: toIso(existing.registration_close_at),
+    check_in_opens_at: toIso(existing.check_in_opens_at),
+    check_in_closes_at: toIso(existing.check_in_closes_at),
+    skill_ids: (existing.skills ?? []).map((s) => s.id).sort((a, b) => a - b),
+    eligible_faculty_ids: (existing.eligible_faculties ?? [])
+      .map((f) => f.id)
+      .sort((a, b) => a - b),
+  };
+}
 import { deleteObject, getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
+
+const ADMIN_ROLES = new Set(['admin', 'super_admin']);
 
 // helper: parse + validate academic_year query param (รับเฉพาะ พ.ศ. 4 หลัก)
 function parseAcademicYear(raw) {
@@ -66,9 +131,13 @@ export async function stats(req, res) {
 //   คืน { current, default_year, available } ใช้ populate dropdown filter
 //     default_year = max ของปีที่คณะมี activity (กันเคสคณะสร้างกิจกรรมในปีถัดไปแล้ว
 //                    แต่ dashboard default เป็นปีปัจจุบัน → ไม่เห็น)
+//   admin/super_admin: ไม่มี faculty scope → คืนเฉพาะ current (ใช้ตอนเปิดฟอร์ม create)
 export async function academicYears(req, res) {
-  if (!requireFaculty(req, res)) return;
   const current = getCurrentAcademicYearBE();
+  if (ADMIN_ROLES.has(req.user.role) && !req.user.faculty_id) {
+    return res.json({ current, default_year: current, available: [current] });
+  }
+  if (!requireFaculty(req, res)) return;
   const fromDb = await activities.listAcademicYearsByFaculty(req.user.faculty_id);
   const default_year = fromDb.length > 0 ? fromDb[0] : current;
   const set = new Set(fromDb);
@@ -348,15 +417,42 @@ async function decoratePoster(activity) {
 }
 
 export async function create(req, res) {
-  if (!requireFaculty(req, res)) return;
+  // resolve faculty_id ของกิจกรรม:
+  //   - admin / super_admin: ต้องส่ง body.faculty_id (เลือกคณะให้กิจกรรม)
+  //   - faculty_staff:       ใช้ req.user.faculty_id (snapshot ของผู้สร้าง)
+  let createdByFacultyId;
+  if (ADMIN_ROLES.has(req.user.role)) {
+    const raw = req.body?.faculty_id;
+    const fid = Number(raw);
+    if (!Number.isInteger(fid) || fid < 1) {
+      return badRequest(res, 'กรุณาเลือกคณะ/หน่วยงานของกิจกรรม');
+    }
+    const fac = await findFacultyById(fid);
+    if (!fac || !fac.is_active) {
+      return badRequest(res, 'คณะ/หน่วยงานที่เลือกไม่ถูกต้องหรือถูกปิดใช้งาน');
+    }
+    createdByFacultyId = fid;
+  } else {
+    if (!requireFaculty(req, res)) return;
+    createdByFacultyId = req.user.faculty_id;
+  }
+
   const errors = validatePayload(req.body || {}, { requirePoster: true });
   if (errors.length) {
     return res.status(400).json({ status: 'error', message: errors[0], errors });
   }
   const payload = normalizePayload(req.body);
+  // ตรวจว่า skill_ids ทุกตัวเป็น child ของ academic_year ที่ส่งมา (hierarchy)
+  const sv = await validateSkillIdsForYear(payload.skill_ids, payload.academic_year);
+  if (!sv.ok) {
+    return badRequest(
+      res,
+      `"ทักษะที่จะได้รับ" บางรายการไม่ตรงกับปี ${payload.academic_year} หรือเป็นรายการแม่ (root)`,
+    );
+  }
   let id;
   try {
-    id = await activities.createActivity(payload, req.user.id, req.user.faculty_id);
+    id = await activities.createActivity(payload, req.user.id, createdByFacultyId);
   } catch (err) {
     // create ล้มเหลว → ลบ poster ที่ upload ไปแล้วใน MinIO (best-effort, กัน orphan)
     if (payload.poster?.storage_key) {
@@ -365,6 +461,23 @@ export async function create(req, res) {
     throw err;
   }
   const created = await decoratePoster(await activities.findById(id));
+  // audit: CREATE — เก็บ snapshot ของ key fields (ทุกอย่าง "ใหม่" ตอน create)
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.CREATE,
+    after: {
+      title: created.title,
+      faculty_id: createdByFacultyId,
+      organization_id: created.organization_id,
+      category_id: created.category_id,
+      academic_year: created.academic_year,
+      semester: created.semester,
+      hours: created.hours,
+      capacity: created.capacity,
+    },
+    ...auditMetaFromReq(req),
+  });
   res.status(201).json({
     ...created,
     is_mine: true,
@@ -393,6 +506,13 @@ export async function update(req, res) {
   }
 
   const payload = normalizePayload(req.body);
+  const sv = await validateSkillIdsForYear(payload.skill_ids, payload.academic_year);
+  if (!sv.ok) {
+    return badRequest(
+      res,
+      `"ทักษะที่จะได้รับ" บางรายการไม่ตรงกับปี ${payload.academic_year} หรือเป็นรายการแม่ (root)`,
+    );
+  }
   let result;
   try {
     result = await activities.updateActivity(id, payload, req.user.id);
@@ -413,6 +533,19 @@ export async function update(req, res) {
     deleteObject(result.oldPosterStorageKey);
   }
   const updated = await decoratePoster(await activities.findById(id));
+  // audit: EDIT — เฉพาะ field ที่เปลี่ยน
+  const diff = buildDiff(existingForDiff(existing), payload, FULL_EDIT_DIFF_FIELDS);
+  if (diff) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: id,
+      action: AUDIT.EDIT,
+      before: diff.before,
+      after: diff.after,
+      note: `แก้ไข ${diff.changed.length} field`,
+      ...auditMetaFromReq(req),
+    });
+  }
   res.json({
     ...updated,
     is_mine: true,
@@ -549,6 +682,19 @@ export async function updateLimited(req, res) {
   }
 
   const updated = await decoratePoster(await activities.findById(id));
+  // audit: EDIT_LIMITED — เฉพาะ field ที่เปลี่ยน
+  const diff = buildDiff(existingForDiff(existing), payload, LIMITED_EDIT_DIFF_FIELDS);
+  if (diff) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: id,
+      action: AUDIT.EDIT_LIMITED,
+      before: diff.before,
+      after: diff.after,
+      note: `แก้ไขโหมดจำกัด ${diff.changed.length} field`,
+      ...auditMetaFromReq(req),
+    });
+  }
   res.json({
     ...updated,
     is_mine: true,

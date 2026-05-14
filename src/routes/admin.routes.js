@@ -38,7 +38,9 @@ import {
   bulkAdd as bulkAddRegistration,
   bulkApprove as bulkApproveRegistration,
   bulkEvaluate as bulkEvaluateRegistration,
+  bulkParticipantRole as bulkParticipantRoleRegistration,
 } from '../controllers/admin-registration.controller.js';
+import { list as listMasterDataAudit } from '../controllers/master-data-audit.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -93,18 +95,36 @@ router.post(
   asyncHandler(adminCancelRegistration),
 );
 
-// admin/super_admin จัดการผู้สมัครรายกิจกรรม (cross-faculty) — รับ msu_ids
+// super_admin only — จัดการผู้สมัครรายกิจกรรม (cross-faculty) รับ msu_ids
+//   admin เห็น stats ได้ (ผ่าน /admin/registrations) แต่ "เขียน" ไม่ได้
 router.post(
   '/activities/:id/registrations/bulk-add',
+  requireRole('super_admin'),
   asyncHandler(bulkAddRegistration),
 );
 router.post(
   '/activities/:id/registrations/bulk-approve',
+  requireRole('super_admin'),
   asyncHandler(bulkApproveRegistration),
 );
 router.post(
   '/activities/:id/registrations/bulk-evaluate',
+  requireRole('super_admin'),
   asyncHandler(bulkEvaluateRegistration),
+);
+// เปลี่ยน participant_role — super_admin only (admin override ห้ามแก้สถานภาพ)
+router.post(
+  '/activities/:id/registrations/bulk-participant-role',
+  requireRole('super_admin'),
+  asyncHandler(bulkParticipantRoleRegistration),
+);
+
+// master_data audit viewer — super_admin only
+//   query: target_type/target_id/target_key/action/actor_id/limit/offset
+router.get(
+  '/master-data-audit',
+  requireRole('super_admin'),
+  asyncHandler(listMasterDataAudit),
 );
 
 // announcements — admin + super_admin จัดการ (อ่านบน public endpoint)

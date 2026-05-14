@@ -33,6 +33,7 @@ import {
   evaluate as evaluateRegistration,
   bulkAdd as bulkAddRegistrations,
   bulkEvaluate as bulkEvaluateRegistrations,
+  bulkParticipantRole as bulkParticipantRoleRegistrations,
   staffCheckIn as staffCheckInRegistrations,
 } from '../controllers/faculty-registration.controller.js';
 
@@ -132,6 +133,10 @@ router.post(
 router.post(
   '/activities/:id/registrations/bulk-add',
   asyncHandler(bulkAddRegistrations),
+);
+router.post(
+  '/activities/:id/registrations/bulk-participant-role',
+  asyncHandler(bulkParticipantRoleRegistrations),
 );
 
 export default router;

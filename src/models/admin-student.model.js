@@ -139,6 +139,7 @@ export async function listStudentRegistrations(userId) {
     `SELECT
        r.id                 AS registration_id,
        r.status             AS registration_status,
+       r.participant_role,
        r.evaluation_status,
        r.evaluation_note,
        r.registered_at,
@@ -239,6 +240,7 @@ export async function adminCancelRegistration(registrationId, actorId, reason) {
 const REGISTRATION_BROWSE_COLS = `
   r.id                AS registration_id,
   r.status            AS registration_status,
+  r.participant_role,
   r.evaluation_status,
   r.registered_at,
   r.attended_at,

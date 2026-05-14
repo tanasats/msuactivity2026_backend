@@ -13,6 +13,7 @@ export async function listMyRegistrations(userId, academicYear = null) {
   const { rows } = await query(
     `SELECT r.id           AS registration_id,
             r.status       AS registration_status,
+            r.participant_role,
             r.qr_token,
             r.attended_at,
             r.evaluation_status,

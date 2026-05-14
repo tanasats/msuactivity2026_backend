@@ -2,20 +2,50 @@ import { query } from '../db/index.js';
 
 // audit actions — เก็บเป็นค่า text (ไม่ใช้ enum เพื่อเพิ่ม action ใหม่ได้ง่าย)
 export const ACTIVITY_AUDIT_ACTIONS = Object.freeze({
+  // ── lifecycle ของกิจกรรม ─────────────────────────────────────
+  CREATE: 'create',                  // สร้างกิจกรรมใหม่ (DRAFT)
+  EDIT: 'edit',                      // faculty/admin แก้ไขกิจกรรม (DRAFT mode — full edit)
+  EDIT_LIMITED: 'edit_limited',      // faculty creator แก้ไขแบบจำกัด (WORK mode)
   SUBMIT: 'submit',                  // faculty: DRAFT → PENDING
   APPROVE: 'approve',                // admin: PENDING → WORK
   REJECT: 'reject',                  // admin: PENDING → DRAFT
   SET_STATUS: 'set_status',          // super_admin override
   SET_CREATOR: 'set_creator',        // super_admin: transfer ownership
   COMPLETE: 'complete',              // faculty creator: WORK → COMPLETED
-  CANCEL_REGISTRATION: 'cancel_registration', // admin cancel ผู้สมัคร
-  EDIT_ADMIN: 'edit_admin',          // admin edit fields ของกิจกรรม
+  EDIT_ADMIN: 'edit_admin',          // admin edit fields ของกิจกรรม (override)
   BULK_APPROVE: 'bulk_approve',      // bulk approve activity (1 row ต่อกิจกรรม)
   BULK_REJECT: 'bulk_reject',        // bulk reject activity (1 row ต่อกิจกรรม)
-  BULK_ADD_REGISTRATION: 'bulk_add_registration',     // admin เพิ่มผู้สมัครทีละหลายคน
+
+  // ── registration lifecycle ───────────────────────────────────
+  APPROVE_REGISTRATION: 'approve_registration',           // อนุมัติผู้สมัคร 1 คน (faculty)
+  CANCEL_REGISTRATION: 'cancel_registration',             // ยกเลิกผู้สมัคร (faculty / admin)
+  EVALUATE_REGISTRATION: 'evaluate_registration',         // ประเมินผู้สมัคร 1 คน
+  STAFF_CHECK_IN: 'staff_check_in',                       // เจ้าหน้าที่ check-in แทน (single/bulk)
+  BULK_ADD_REGISTRATION: 'bulk_add_registration',         // เพิ่มผู้สมัครทีละหลายคน (faculty/admin)
   BULK_APPROVE_REGISTRATION: 'bulk_approve_registration', // admin อนุมัติผู้สมัครหลายคน
-  BULK_EVALUATE_REGISTRATION: 'bulk_evaluate_registration', // admin ประเมินหลายคน
+  BULK_EVALUATE_REGISTRATION: 'bulk_evaluate_registration', // ประเมินหลายคน (faculty/admin)
+  CHANGE_PARTICIPANT_ROLE: 'change_participant_role',     // เปลี่ยนสถานภาพผู้เข้าร่วม
 });
+
+// คำนวณ diff ของ payload — เก็บเฉพาะ field ที่เปลี่ยน
+//   ใช้ shallow comparison (JSON.stringify) — สำหรับ field ที่เป็น array/object ก็เปรียบเทียบทั้งก้อน
+//   คืน { before, after, changed: string[] } — ถ้าไม่มี change คืน null
+export function buildDiff(before, after, fields) {
+  const changed = [];
+  const beforeDiff = {};
+  const afterDiff = {};
+  for (const f of fields) {
+    const b = before?.[f] ?? null;
+    const a = after?.[f] ?? null;
+    if (JSON.stringify(b) !== JSON.stringify(a)) {
+      changed.push(f);
+      beforeDiff[f] = b;
+      afterDiff[f] = a;
+    }
+  }
+  if (changed.length === 0) return null;
+  return { before: beforeDiff, after: afterDiff, changed };
+}
 
 // บันทึก audit log — เรียกหลังจาก mutation สำเร็จ
 //   ทุก field optional ยกเว้น actor_id / activity_id / action
