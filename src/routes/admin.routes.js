@@ -37,6 +37,7 @@ import {
 import {
   bulkAdd as bulkAddRegistration,
   bulkApprove as bulkApproveRegistration,
+  bulkCheckIn as bulkCheckInRegistration,
   bulkEvaluate as bulkEvaluateRegistration,
   bulkParticipantRole as bulkParticipantRoleRegistration,
 } from '../controllers/admin-registration.controller.js';
@@ -111,6 +112,11 @@ router.post(
   '/activities/:id/registrations/bulk-evaluate',
   requireRole('super_admin'),
   asyncHandler(bulkEvaluateRegistration),
+);
+router.post(
+  '/activities/:id/registrations/bulk-check-in',
+  requireRole('super_admin'),
+  asyncHandler(bulkCheckInRegistration),
 );
 // เปลี่ยน participant_role — super_admin only (admin override ห้ามแก้สถานภาพ)
 router.post(

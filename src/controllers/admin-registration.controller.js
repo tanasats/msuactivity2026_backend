@@ -5,6 +5,7 @@ import {
   bulkUpdateParticipantRole,
   isValidParticipantRole,
   resolveMsuIdsToRegistrationIds,
+  staffCheckInBulk,
 } from '../models/faculty-registration.model.js';
 import { findById as findActivity } from '../models/faculty-activity.model.js';
 import {
@@ -287,6 +288,75 @@ export async function bulkParticipantRole(req, res) {
   res.json({
     status: 'ok',
     updated,
+    skipped: out.skipped,
+    errors: resolved.errors,
+  });
+}
+
+// POST /api/admin/activities/:id/registrations/bulk-check-in
+//   body: { msu_ids: string[] }
+//   super_admin only — เพิ่มรายชื่อ check-in (REGISTERED → ATTENDED)
+//   bypass QR/window — เป็น override สำหรับกรณีที่นิสิตเช็คอินไม่ได้ด้วยตัวเอง
+//   activity ต้องอยู่ใน WORK หรือ COMPLETED
+//   ใช้ staffCheckInBulk (เดิม) ผ่านการ resolve msu_ids → registration_ids ก่อน
+export async function bulkCheckIn(req, res) {
+  const activity = await loadActivity(req, res);
+  if (!activity) return;
+
+  if (activity.status !== 'WORK' && activity.status !== 'COMPLETED') {
+    return err(res, 409, 'กิจกรรมยังไม่อยู่ในสถานะที่เช็คอินได้ (ต้อง WORK/COMPLETED)');
+  }
+
+  const parsed = parseMsuIds(req.body?.msu_ids);
+  if (parsed.error) return err(res, 400, parsed.error);
+
+  const resolved = await resolveMsuIdsToRegistrationIds(
+    activity.id,
+    parsed.msuIds,
+    ['REGISTERED'],
+  );
+  if (resolved.resolved.length === 0) {
+    return res.json({
+      status: 'ok',
+      checked_in: [],
+      skipped: [],
+      errors: resolved.errors,
+    });
+  }
+
+  const out = await staffCheckInBulk({
+    activityId: activity.id,
+    registrationIds: resolved.resolved.map((r) => r.registration_id),
+    staffId: req.user.id,
+  });
+
+  // map registration_id → msu_id เพื่อให้ frontend แสดงผลตามรหัสนิสิต
+  const idToMsuId = new Map(
+    resolved.resolved.map((r) => [r.registration_id, r.msu_id]),
+  );
+  const checkedIn = out.checkedIn.map((id) => ({
+    msu_id: idToMsuId.get(id),
+    registration_id: id,
+  }));
+
+  if (checkedIn.length > 0) {
+    await createActivityAuditLog({
+      actor_id: req.user.id,
+      activity_id: activity.id,
+      action: AUDIT.STAFF_CHECK_IN,
+      after: {
+        count: checkedIn.length,
+        msu_ids: checkedIn.map((c) => c.msu_id),
+        registration_ids: checkedIn.map((c) => c.registration_id),
+      },
+      note: `admin check-in ${checkedIn.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+  }
+
+  res.json({
+    status: 'ok',
+    checked_in: checkedIn,
     skipped: out.skipped,
     errors: resolved.errors,
   });
