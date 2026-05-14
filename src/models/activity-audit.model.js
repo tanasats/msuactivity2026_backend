@@ -10,8 +10,11 @@ export const ACTIVITY_AUDIT_ACTIONS = Object.freeze({
   COMPLETE: 'complete',              // faculty creator: WORK → COMPLETED
   CANCEL_REGISTRATION: 'cancel_registration', // admin cancel ผู้สมัคร
   EDIT_ADMIN: 'edit_admin',          // admin edit fields ของกิจกรรม
-  BULK_APPROVE: 'bulk_approve',      // bulk approve (1 row ต่อกิจกรรม)
-  BULK_REJECT: 'bulk_reject',        // bulk reject (1 row ต่อกิจกรรม)
+  BULK_APPROVE: 'bulk_approve',      // bulk approve activity (1 row ต่อกิจกรรม)
+  BULK_REJECT: 'bulk_reject',        // bulk reject activity (1 row ต่อกิจกรรม)
+  BULK_ADD_REGISTRATION: 'bulk_add_registration',     // admin เพิ่มผู้สมัครทีละหลายคน
+  BULK_APPROVE_REGISTRATION: 'bulk_approve_registration', // admin อนุมัติผู้สมัครหลายคน
+  BULK_EVALUATE_REGISTRATION: 'bulk_evaluate_registration', // admin ประเมินหลายคน
 });
 
 // บันทึก audit log — เรียกหลังจาก mutation สำเร็จ

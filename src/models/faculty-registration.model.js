@@ -136,6 +136,74 @@ export async function evaluateRegistration(
   return rows[0] || null;
 }
 
+// bulk approve: หลาย registration ในกิจกรรมเดียวกัน (atomic ต่อ row)
+//   - filter เฉพาะ PENDING_APPROVAL ใน activity ที่ระบุ — ป้องกัน cross-activity smear
+//   - คืน { approved: [{registration_id, qr_token}], skipped: [registration_id] }
+export async function bulkApproveRegistrations({
+  activityId,
+  registrationIds,
+  approverId,
+}) {
+  if (registrationIds.length === 0) {
+    return { approved: [], skipped: [] };
+  }
+  const { rows } = await query(
+    `UPDATE registrations
+        SET status      = 'REGISTERED',
+            qr_token    = COALESCE(qr_token, gen_random_uuid()),
+            approved_at = now(),
+            approved_by = $3,
+            updated_at  = now()
+      WHERE id = ANY($2::int[])
+        AND activity_id = $1
+        AND status = 'PENDING_APPROVAL'
+      RETURNING id AS registration_id, qr_token`,
+    [activityId, registrationIds, approverId],
+  );
+  const approvedIds = new Set(rows.map((r) => r.registration_id));
+  const skipped = registrationIds.filter((id) => !approvedIds.has(id));
+  return { approved: rows, skipped };
+}
+
+// resolve msu_ids → registration_ids ของ activity นี้ + status ที่อยู่ใน allowed
+//   - คืน { resolved: [{msu_id, registration_id}], errors: [{msu_id, reason}] }
+//   - reason: 'NOT_FOUND' | 'NOT_REGISTERED' | 'STATUS_MISMATCH'
+//   - duplicate msu_id → dedupe + map id เดียว
+export async function resolveMsuIdsToRegistrationIds(
+  activityId,
+  msuIds,
+  allowedStatuses,
+) {
+  if (msuIds.length === 0) return { resolved: [], errors: [] };
+
+  const { rows } = await query(
+    `SELECT u.msu_id, r.id AS registration_id, r.status
+       FROM users u
+       LEFT JOIN registrations r
+         ON r.user_id = u.id AND r.activity_id = $1
+      WHERE u.msu_id = ANY($2::text[])`,
+    [activityId, msuIds],
+  );
+
+  const allowed = new Set(allowedStatuses);
+  const byMsuId = new Map(rows.map((r) => [r.msu_id, r]));
+  const resolved = [];
+  const errors = [];
+  for (const msuId of msuIds) {
+    const r = byMsuId.get(msuId);
+    if (!r) {
+      errors.push({ msu_id: msuId, reason: 'NOT_FOUND' });
+    } else if (!r.registration_id) {
+      errors.push({ msu_id: msuId, reason: 'NOT_REGISTERED' });
+    } else if (!allowed.has(r.status)) {
+      errors.push({ msu_id: msuId, reason: 'STATUS_MISMATCH', current_status: r.status });
+    } else {
+      resolved.push({ msu_id: msuId, registration_id: r.registration_id });
+    }
+  }
+  return { resolved, errors };
+}
+
 // approve: PENDING_APPROVAL → REGISTERED + gen qr_token + บันทึก approver
 //   counter ไม่เปลี่ยน เพราะ register ตอนแรกได้ +1 แล้ว
 //   (status ทั้งสองเป็น active ใน partial unique index)

@@ -34,6 +34,11 @@ import {
   registrationsCsv,
   cancelRegistration as adminCancelRegistration,
 } from '../controllers/admin-student.controller.js';
+import {
+  bulkAdd as bulkAddRegistration,
+  bulkApprove as bulkApproveRegistration,
+  bulkEvaluate as bulkEvaluateRegistration,
+} from '../controllers/admin-registration.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -86,6 +91,20 @@ router.get('/registrations.csv', asyncHandler(registrationsCsv));
 router.post(
   '/registrations/:id/cancel',
   asyncHandler(adminCancelRegistration),
+);
+
+// admin/super_admin จัดการผู้สมัครรายกิจกรรม (cross-faculty) — รับ msu_ids
+router.post(
+  '/activities/:id/registrations/bulk-add',
+  asyncHandler(bulkAddRegistration),
+);
+router.post(
+  '/activities/:id/registrations/bulk-approve',
+  asyncHandler(bulkApproveRegistration),
+);
+router.post(
+  '/activities/:id/registrations/bulk-evaluate',
+  asyncHandler(bulkEvaluateRegistration),
 );
 
 // announcements — admin + super_admin จัดการ (อ่านบน public endpoint)
