@@ -4,6 +4,7 @@ import { landingStats, publicStats } from '../controllers/public-stats.controlle
 import {
   list as listActivities,
   detail as activityDetail,
+  recordView as recordActivityView,
   search as searchActivities,
 } from '../controllers/public-activity.controller.js';
 import { listPublic as listAnnouncements } from '../controllers/announcement.controller.js';
@@ -17,6 +18,7 @@ router.get('/activities', asyncHandler(listActivities));
 // search ต้องมาก่อน /:id ไม่งั้น "search" จะถูก parse เป็น id
 router.get('/activities/search', asyncHandler(searchActivities));
 router.get('/activities/:id', asyncHandler(activityDetail));
+router.post('/activities/:id/view', asyncHandler(recordActivityView));
 router.get('/announcements', asyncHandler(listAnnouncements));
 
 export default router;

@@ -3,6 +3,7 @@ import {
   getPublicActivityDetail,
   searchPublicActivities,
 } from '../models/public-activity.model.js';
+import { incrementViewCount } from '../models/activity-interest.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 
 const ALLOWED_FILTERS = new Set(['open', 'upcoming']);
@@ -83,4 +84,19 @@ export async function detail(req, res) {
     );
   }
   res.json(activity);
+}
+
+// POST /api/public/activities/:id/view
+//   public — dedup ฝั่ง client ด้วย localStorage (1 view ต่อ session)
+//   ไม่ตรวจ activity status เพราะอยากนับ view ของ COMPLETED ด้วยได้
+export async function recordView(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ status: 'error', message: 'invalid id' });
+  }
+  const ok = await incrementViewCount(id);
+  if (!ok) {
+    return res.status(404).json({ status: 'error', message: 'activity not found' });
+  }
+  res.json({ status: 'ok' });
 }

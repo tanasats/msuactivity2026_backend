@@ -30,8 +30,9 @@ export async function getPublicStats(academicYearBE) {
 //   - members_count   : บัญชีที่ active (ทุก role)
 //   - by_year         : กิจกรรมต่อปีการศึกษา แบ่ง work/completed (ทุกปีที่มีข้อมูล)
 //   - by_category     : กิจกรรมต่อหมวดประเภท 4 หมวด (ทุกปี รวม)
+//   - by_skill        : สัดส่วนทักษะที่จะได้รับ (rollup ระดับ parent — รวม child ทุกปีเข้ามา)
 export async function getLandingStats() {
-  const [totals, byYear, byCategory] = await Promise.all([
+  const [totals, byYear, byCategory, bySkill] = await Promise.all([
     query(
       `SELECT
          (SELECT COUNT(*)::int FROM activities
@@ -61,6 +62,26 @@ export async function getLandingStats() {
        GROUP BY c.id, c.code, c.name
        ORDER BY c.code ASC`,
     ),
+    // by_skill: นับกิจกรรมต่อทักษะระดับ parent (รวม child ทุกปีเข้ามา)
+    //   COALESCE(s.parent_id, s.id) = root id — รองรับทั้ง legacy (ผูก parent ตรง) และ new (ผูก child)
+    //   LEFT JOIN parent ทำให้ทักษะที่ไม่มีกิจกรรมยังโผล่ใน list (count=0)
+    //   เริ่มจาก skills parent — แล้ว LEFT JOIN ไป activity เพื่อให้ tone "0 ก็แสดง" ได้
+    query(
+      `SELECT
+         root.id   AS skill_id,
+         root.code AS skill_code,
+         root.name AS skill_name,
+         COUNT(DISTINCT a.id)::int AS count
+       FROM skills root
+       LEFT JOIN skills s ON COALESCE(s.parent_id, s.id) = root.id
+       LEFT JOIN activity_skills aks ON aks.skill_id = s.id
+       LEFT JOIN activities a ON a.id = aks.activity_id
+        AND a.status IN ('WORK','COMPLETED')
+       WHERE root.parent_id IS NULL
+         AND root.is_active = true
+       GROUP BY root.id, root.code, root.name
+       ORDER BY root.code ASC`,
+    ),
   ]);
 
   return {
@@ -68,5 +89,6 @@ export async function getLandingStats() {
     members_count: totals.rows[0].members_count,
     by_year: byYear.rows,
     by_category: byCategory.rows,
+    by_skill: bySkill.rows,
   };
 }

@@ -14,6 +14,12 @@ import {
   upload as uploadPhoto,
   remove as removePhoto,
 } from '../controllers/registration-photo.controller.js';
+import {
+  list as listInterests,
+  listIds as listInterestIds,
+  add as addInterest,
+  remove as removeInterestCtrl,
+} from '../controllers/student-interest.controller.js';
 
 // multer in-memory — เพดานเผื่อ overhead 6 MB (spec รูป 5 MB)
 const photoUpload = multer({
@@ -47,5 +53,11 @@ router.delete(
   '/registrations/:regId/photos/:photoId',
   asyncHandler(removePhoto),
 );
+
+// interests (กิจกรรมที่นิสิตกด "สนใจ" — bookmark)
+router.get('/interests', asyncHandler(listInterests));
+router.get('/interests/ids', asyncHandler(listInterestIds));
+router.post('/interests/:activityId', asyncHandler(addInterest));
+router.delete('/interests/:activityId', asyncHandler(removeInterestCtrl));
 
 export default router;

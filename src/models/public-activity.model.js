@@ -23,6 +23,8 @@ const SUMMARY_COLUMNS = `
   c.name AS category_name,
   o.code AS organization_code,
   o.name AS organization_name,
+  a.view_count,
+  a.interested_count,
   poster.storage_key AS poster_storage_key
 `;
 
