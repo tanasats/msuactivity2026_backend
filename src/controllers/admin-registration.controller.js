@@ -13,6 +13,10 @@ import {
   auditMetaFromReq,
   ACTIVITY_AUDIT_ACTIONS as AUDIT,
 } from '../models/activity-audit.model.js';
+import {
+  bulkCreateRegistrationAuditLog,
+  REGISTRATION_AUDIT_ACTIONS as RA,
+} from '../models/registration-audit.model.js';
 
 // admin/super_admin จัดการผู้สมัครได้ทุกกิจกรรม (cross-faculty)
 //   - ไม่มี faculty scope check + ไม่ต้อง created_by ของกิจกรรม
@@ -87,6 +91,14 @@ export async function bulkAdd(req, res) {
       note: `admin-add ${result.added.length} คน (skip ${result.errors.length})`,
       ...auditMetaFromReq(req),
     });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: result.added.map((a) => a.registration_id),
+      action: RA.STAFF_ADD,
+      after: { activity_id: activity.id, status: 'REGISTERED' },
+      note: 'admin bulk-add',
+      ...auditMetaFromReq(req),
+    });
   }
 
   res.status(201).json({ status: 'ok', ...result });
@@ -141,6 +153,15 @@ export async function bulkApprove(req, res) {
         msu_ids: approved.map((a) => a.msu_id),
       },
       note: `admin-approve ${approved.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: approved.map((a) => a.registration_id),
+      action: RA.APPROVE,
+      before: { status: 'PENDING_APPROVAL' },
+      after: { status: 'REGISTERED' },
+      note: 'admin bulk-approve',
       ...auditMetaFromReq(req),
     });
   }
@@ -216,6 +237,14 @@ export async function bulkEvaluate(req, res) {
       note: `admin-evaluate ${result} ${evaluated.length} คน${note ? ` — ${note}` : ''}`,
       ...auditMetaFromReq(req),
     });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: evaluated.map((e) => e.registration_id),
+      action: RA.EVALUATE,
+      after: { evaluation_status: result, evaluation_note: note },
+      note: note ?? `admin bulk-evaluate ${result}`,
+      ...auditMetaFromReq(req),
+    });
   }
 
   res.json({
@@ -281,6 +310,14 @@ export async function bulkParticipantRole(req, res) {
         msu_ids: updated.map((u) => u.msu_id),
       },
       note: `admin set ${role} ให้ ${updated.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: updated.map((u) => u.registration_id),
+      action: RA.CHANGE_ROLE,
+      after: { participant_role: role },
+      note: `admin set role = ${role}`,
       ...auditMetaFromReq(req),
     });
   }
@@ -350,6 +387,15 @@ export async function bulkCheckIn(req, res) {
         registration_ids: checkedIn.map((c) => c.registration_id),
       },
       note: `admin check-in ${checkedIn.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: checkedIn.map((c) => c.registration_id),
+      action: RA.STAFF_CHECK_IN,
+      before: { status: 'REGISTERED' },
+      after: { status: 'ATTENDED', method: 'MANUAL_STAFF' },
+      note: 'admin bulk check-in',
       ...auditMetaFromReq(req),
     });
   }

@@ -3,6 +3,11 @@ import {
   getCheckInWindowDefaults,
   recordCheckIn,
 } from '../models/check-in.model.js';
+import {
+  createRegistrationAuditLog,
+  auditMetaFromReq,
+  REGISTRATION_AUDIT_ACTIONS as RA,
+} from '../models/registration-audit.model.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -121,6 +126,20 @@ export async function scan(req, res) {
     }
     throw err;
   }
+
+  // audit: เจ้าหน้าที่สแกน QR ของนิสิต — actor = staff (req.user), action = CHECK_IN
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: reg.registration_id,
+    action: RA.CHECK_IN,
+    before: { status: 'REGISTERED' },
+    after: {
+      status: 'ATTENDED',
+      method: 'QR_STAFF',
+      attendance_id: result.attendanceId,
+    },
+    ...auditMetaFromReq(req),
+  });
 
   return ok(res, 200, {
     status: 'ok',

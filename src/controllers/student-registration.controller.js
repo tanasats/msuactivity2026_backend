@@ -6,6 +6,11 @@ import {
   listMyRegistrations,
 } from '../models/student-registration.model.js';
 import { listByRegistrations } from '../models/registration-photo.model.js';
+import {
+  createRegistrationAuditLog,
+  auditMetaFromReq,
+  REGISTRATION_AUDIT_ACTIONS as RA,
+} from '../models/registration-audit.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
 
@@ -90,6 +95,14 @@ export async function cancel(req, res) {
       message: 'ยกเลิกได้เฉพาะการสมัครที่อยู่ในสถานะ "รออนุมัติ" และเป็นของท่านเอง',
     });
   }
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: id,
+    action: RA.CANCEL_BY_USER,
+    before: { status: 'PENDING_APPROVAL' },
+    after: { status: result.status },
+    ...auditMetaFromReq(req),
+  });
   res.json({ id: result.id, status: result.status });
 }
 
@@ -119,5 +132,15 @@ export async function register(req, res) {
       reason: result.reason,
     });
   }
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: result.registration.id,
+    action: RA.REGISTER,
+    after: {
+      activity_id: activityId,
+      status: result.registration.status,
+    },
+    ...auditMetaFromReq(req),
+  });
   res.status(201).json({ status: 'ok', registration: result.registration });
 }

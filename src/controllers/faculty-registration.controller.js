@@ -16,6 +16,11 @@ import {
   auditMetaFromReq,
   ACTIVITY_AUDIT_ACTIONS as AUDIT,
 } from '../models/activity-audit.model.js';
+import {
+  createRegistrationAuditLog,
+  bulkCreateRegistrationAuditLog,
+  REGISTRATION_AUDIT_ACTIONS as RA,
+} from '../models/registration-audit.model.js';
 
 const EVALUATION_RESULTS = new Set(['PASSED', 'FAILED']);
 
@@ -92,6 +97,14 @@ export async function approve(req, res) {
     after: { registration_id: ctx.regId, user_id: ctx.reg.user_id },
     ...auditMetaFromReq(req),
   });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: ctx.regId,
+    action: RA.APPROVE,
+    before: { status: 'PENDING_APPROVAL' },
+    after: { status: 'REGISTERED' },
+    ...auditMetaFromReq(req),
+  });
   res.json({ status: 'ok', registration: result });
 }
 
@@ -112,6 +125,15 @@ export async function cancel(req, res) {
     action: AUDIT.CANCEL_REGISTRATION,
     before: { status: ctx.reg.status },
     after: { registration_id: ctx.regId, user_id: ctx.reg.user_id, reason },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: ctx.regId,
+    action: RA.CANCEL_BY_STAFF,
+    before: { status: ctx.reg.status },
+    after: { status: 'CANCELLED_BY_STAFF', reason },
     note: reason,
     ...auditMetaFromReq(req),
   });
@@ -153,6 +175,14 @@ export async function evaluate(req, res) {
       result,
       note,
     },
+    ...auditMetaFromReq(req),
+  });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: ctx.regId,
+    action: RA.EVALUATE,
+    after: { evaluation_status: result, evaluation_note: note },
+    note,
     ...auditMetaFromReq(req),
   });
   res.json({ status: 'ok', registration: updated });
@@ -207,6 +237,14 @@ export async function staffCheckIn(req, res) {
         registration_ids: out.checkedIn,
       },
       note: `staff check-in ${out.checkedIn.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: out.checkedIn,
+      action: RA.STAFF_CHECK_IN,
+      before: { status: 'REGISTERED' },
+      after: { status: 'ATTENDED', method: 'MANUAL_STAFF' },
       ...auditMetaFromReq(req),
     });
   }
@@ -274,6 +312,14 @@ export async function bulkEvaluate(req, res) {
       note: note ?? `bulk evaluate ${result} ${out.updated.length} คน`,
       ...auditMetaFromReq(req),
     });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: out.updated,
+      action: RA.EVALUATE,
+      after: { evaluation_status: result, evaluation_note: note },
+      note,
+      ...auditMetaFromReq(req),
+    });
   }
   res.json({ status: 'ok', ...out });
 }
@@ -319,6 +365,14 @@ export async function bulkAdd(req, res) {
         registration_ids: result.added.map((r) => r.registration_id),
       },
       note: `bulk add ${result.added.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: result.added.map((r) => r.registration_id),
+      action: RA.STAFF_ADD,
+      after: { activity_id: activityId, status: 'REGISTERED' },
+      note: `bulk-add by faculty staff`,
       ...auditMetaFromReq(req),
     });
   }
@@ -378,6 +432,14 @@ export async function bulkParticipantRole(req, res) {
         registration_ids: out.updated,
       },
       note: `set ${role} ให้ ${out.updated.length} คน`,
+      ...auditMetaFromReq(req),
+    });
+    await bulkCreateRegistrationAuditLog({
+      actor_id: req.user.id,
+      registration_ids: out.updated,
+      action: RA.CHANGE_ROLE,
+      after: { participant_role: role },
+      note: `faculty set role = ${role}`,
       ...auditMetaFromReq(req),
     });
   }

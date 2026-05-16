@@ -33,6 +33,7 @@ import {
   listRegistrations,
   registrationsCsv,
   cancelRegistration as adminCancelRegistration,
+  registrationAuditLog,
 } from '../controllers/admin-student.controller.js';
 import {
   bulkAdd as bulkAddRegistration,
@@ -94,6 +95,11 @@ router.get('/registrations.csv', asyncHandler(registrationsCsv));
 router.post(
   '/registrations/:id/cancel',
   asyncHandler(adminCancelRegistration),
+);
+// audit timeline ของ registration เฉพาะ row — admin + super_admin (read-only)
+router.get(
+  '/registrations/:id/audit',
+  asyncHandler(registrationAuditLog),
 );
 
 // super_admin only — จัดการผู้สมัครรายกิจกรรม (cross-faculty) รับ msu_ids

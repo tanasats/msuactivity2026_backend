@@ -5,6 +5,11 @@ import {
   auditMetaFromReq,
   ACTIVITY_AUDIT_ACTIONS as AUDIT,
 } from '../models/activity-audit.model.js';
+import {
+  createRegistrationAuditLog,
+  listAuditForRegistration,
+  REGISTRATION_AUDIT_ACTIONS as RA,
+} from '../models/registration-audit.model.js';
 import { rowsToCsv, sendCsv } from '../utils/csv.js';
 
 const DEFAULT_LIMIT = 50;
@@ -247,8 +252,28 @@ export async function cancelRegistration(req, res) {
     note: reason,
     ...auditMetaFromReq(req),
   });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: id,
+    action: RA.CANCEL_BY_STAFF,
+    before: { status: result.previous_status },
+    after: { status: 'CANCELLED_BY_STAFF', reason },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
 
   res.json({ status: 'ok', registration_id: id });
+}
+
+// GET /api/admin/registrations/:id/audit
+//   timeline ของการเปลี่ยน status ทั้งหมดของ registration นี้
+//   admin + super_admin (read-only — gate ที่ route แล้ว)
+export async function registrationAuditLog(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const items = await listAuditForRegistration(id, { limit: 200 });
+  res.json({ items });
 }
 
 export async function registrationsCsv(req, res) {
