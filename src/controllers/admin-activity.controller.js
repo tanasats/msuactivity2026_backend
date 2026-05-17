@@ -7,6 +7,7 @@ import {
 } from '../models/activity-audit.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
+import { sanitizeRichText } from '../utils/sanitize-html.js';
 
 const ALLOWED_STATUSES = new Set([
   'DRAFT',
@@ -343,7 +344,7 @@ const ADMIN_EDIT_VALIDATORS = {
       : { ok: false, message: 'title ต้องเป็น string ความยาว 1–500' },
   description: (v) =>
     typeof v === 'string' && v.length <= 10000
-      ? { ok: true, value: v }
+      ? { ok: true, value: sanitizeRichText(v) }
       : { ok: false, message: 'description ต้องเป็น string ≤ 10000' },
   location: (v) =>
     typeof v === 'string' && v.length <= 500

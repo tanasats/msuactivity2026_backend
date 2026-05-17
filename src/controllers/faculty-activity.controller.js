@@ -69,6 +69,7 @@ function existingForDiff(existing) {
 }
 import { deleteObject, getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
+import { sanitizeRichText } from '../utils/sanitize-html.js';
 
 const ADMIN_ROLES = new Set(['admin', 'super_admin']);
 
@@ -365,7 +366,8 @@ function validatePayload(body, { requirePoster = false } = {}) {
 function normalizePayload(body) {
   const payload = {
     title: body.title.trim(),
-    description: typeof body.description === 'string' ? body.description.trim() : '',
+    // description = rich text HTML (จาก Tiptap) — sanitize ก่อนเก็บ (defense-in-depth กัน XSS)
+    description: sanitizeRichText(body.description),
     location: body.location.trim(),
     organization_id: body.organization_id,
     category_id: body.category_id,
@@ -625,8 +627,7 @@ function normalizeLimitedPayload(body) {
       : parseMoney(body.budget_actual);
   return {
     capacity: body.capacity,
-    description:
-      typeof body.description === 'string' ? body.description.trim() : '',
+    description: sanitizeRichText(body.description),
     location: body.location.trim(),
     start_at: body.start_at,
     end_at: body.end_at,
