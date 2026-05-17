@@ -30,7 +30,10 @@ import {
   list as listRegistrations,
   approve as approveRegistration,
   cancel as cancelRegistration,
+  cancelCheckIn as cancelCheckInRegistration,
   evaluate as evaluateRegistration,
+  revertEvalRegistration,
+  exportRegistrationsXlsx,
   bulkAdd as bulkAddRegistrations,
   bulkEvaluate as bulkEvaluateRegistrations,
   bulkParticipantRole as bulkParticipantRoleRegistrations,
@@ -123,6 +126,14 @@ router.post(
   asyncHandler(evaluateRegistration),
 );
 router.post(
+  '/activities/:id/registrations/:regId/cancel-check-in',
+  asyncHandler(cancelCheckInRegistration),
+);
+router.post(
+  '/activities/:id/registrations/:regId/revert-evaluation',
+  asyncHandler(revertEvalRegistration),
+);
+router.post(
   '/activities/:id/registrations/bulk-evaluate',
   asyncHandler(bulkEvaluateRegistrations),
 );
@@ -137,6 +148,11 @@ router.post(
 router.post(
   '/activities/:id/registrations/bulk-participant-role',
   asyncHandler(bulkParticipantRoleRegistrations),
+);
+// ส่งออกรายชื่อผู้สมัครเป็น .xlsx — เฉพาะผู้สร้างกิจกรรม
+router.get(
+  '/activities/:id/registrations.xlsx',
+  asyncHandler(exportRegistrationsXlsx),
 );
 
 export default router;

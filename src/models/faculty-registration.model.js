@@ -77,6 +77,113 @@ export async function staffCheckInBulk({
   return { checkedIn, skipped };
 }
 
+// ── ยกเลิกการเช็คอิน ────────────────────────────────────────────
+//   precondition:
+//     - registration_status = 'ATTENDED'
+//     - evaluation_status IS NULL หรือ 'PENDING_EVALUATION' (ถ้า evaluate แล้วบล็อก)
+//   tx:
+//     1. UPDATE registrations: status → REGISTERED, attended_at = NULL, evaluation_status = NULL
+//     2. UPDATE attendances: status → INVALID (soft-delete หลักฐาน — เก็บ row ไว้เป็น history)
+//   คืน { ok: true, before: {...} } หรือ { ok: false, reason: 'NOT_FOUND' | 'STATUS_MISMATCH' | 'ALREADY_EVALUATED' }
+export async function cancelStaffCheckIn(registrationId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. ตรวจสถานะปัจจุบัน (lock row) — ใช้ FOR UPDATE กัน race
+    const cur = await client.query(
+      `SELECT id, activity_id, user_id, status, evaluation_status
+         FROM registrations
+        WHERE id = $1
+        FOR UPDATE`,
+      [registrationId],
+    );
+    if (cur.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'NOT_FOUND' };
+    }
+    const reg = cur.rows[0];
+    if (reg.status !== 'ATTENDED') {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'STATUS_MISMATCH', currentStatus: reg.status };
+    }
+    if (
+      reg.evaluation_status !== null &&
+      reg.evaluation_status !== 'PENDING_EVALUATION'
+    ) {
+      await client.query('ROLLBACK');
+      return {
+        ok: false,
+        reason: 'ALREADY_EVALUATED',
+        evaluationStatus: reg.evaluation_status,
+      };
+    }
+
+    // 2. revert registration → REGISTERED + ล้าง attendance metadata
+    await client.query(
+      `UPDATE registrations
+          SET status            = 'REGISTERED',
+              attended_at       = NULL,
+              evaluation_status = NULL,
+              evaluated_at      = NULL,
+              evaluated_by      = NULL,
+              evaluation_note   = NULL,
+              updated_at        = now()
+        WHERE id = $1`,
+      [registrationId],
+    );
+
+    // 3. soft-delete attendance: VALID → INVALID (เก็บ row history)
+    //    1 reg = 1 valid attendance (unique partial index บังคับอยู่แล้ว)
+    await client.query(
+      `UPDATE attendances
+          SET status = 'INVALID'
+        WHERE registration_id = $1 AND status = 'VALID'`,
+      [registrationId],
+    );
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      before: {
+        activity_id: reg.activity_id,
+        user_id: reg.user_id,
+        status: reg.status,
+        evaluation_status: reg.evaluation_status,
+      },
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ── ยกเลิกผลประเมิน (PASSED/FAILED → PENDING_EVALUATION) ───────
+//   precondition:
+//     - registration_status = 'ATTENDED'
+//     - evaluation_status   = 'PASSED' หรือ 'FAILED' (revert ของที่ประเมินแล้วเท่านั้น)
+//   clear: evaluated_at, evaluated_by, evaluation_note
+//   set: evaluation_status = 'PENDING_EVALUATION' (เหมือนเพิ่งเช็คอินใหม่ ๆ)
+//   คืน updated row หรือ null ถ้า precondition ไม่ตรง
+export async function revertEvaluation(registrationId) {
+  const { rows } = await query(
+    `UPDATE registrations
+        SET evaluation_status = 'PENDING_EVALUATION',
+            evaluation_note   = NULL,
+            evaluated_at      = NULL,
+            evaluated_by      = NULL,
+            updated_at        = now()
+      WHERE id = $1
+        AND status = 'ATTENDED'
+        AND evaluation_status IN ('PASSED', 'FAILED')
+      RETURNING id, status, evaluation_status, activity_id, user_id`,
+    [registrationId],
+  );
+  return rows[0] ?? null;
+}
+
 // บันทึกผลประเมินหลายคนพร้อมกัน — single UPDATE กับ ANY(ids)
 //   - บังคับ activity_id ใน WHERE → กันสับ id ข้ามกิจกรรม (ใช้ scope ระดับ DB)
 //   - บังคับ status='ATTENDED' → reg ที่ยังไม่เช็คอินจะถูกข้าม (ไม่ throw)

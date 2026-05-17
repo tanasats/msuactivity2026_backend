@@ -10,6 +10,7 @@ import {
   listAuditForRegistration,
   REGISTRATION_AUDIT_ACTIONS as RA,
 } from '../models/registration-audit.model.js';
+import { cancelStaffCheckIn } from '../models/faculty-registration.model.js';
 import { rowsToCsv, sendCsv } from '../utils/csv.js';
 
 const DEFAULT_LIMIT = 50;
@@ -274,6 +275,66 @@ export async function registrationAuditLog(req, res) {
 
   const items = await listAuditForRegistration(id, { limit: 200 });
   res.json({ items });
+}
+
+// POST /api/admin/registrations/:id/cancel-check-in
+//   body: { reason: string }
+//   super_admin only (gate ที่ route)
+//   revert ATTENDED → REGISTERED + soft-delete attendance — เหมือนกับ faculty version
+export async function cancelCheckIn(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const reasonRaw = req.body?.reason;
+  if (typeof reasonRaw !== 'string' || reasonRaw.trim().length === 0) {
+    return err(res, 400, 'ต้องระบุเหตุผลในการยกเลิกเช็คอิน');
+  }
+  const reason = reasonRaw.trim().slice(0, 500);
+
+  const result = await cancelStaffCheckIn(id);
+  if (!result.ok) {
+    if (result.reason === 'NOT_FOUND') return err(res, 404, 'registration not found');
+    if (result.reason === 'ALREADY_EVALUATED') {
+      return err(
+        res,
+        409,
+        `ประเมินแล้ว (${result.evaluationStatus}) — ยกเลิกเช็คอินไม่ได้`,
+      );
+    }
+    if (result.reason === 'STATUS_MISMATCH') {
+      return err(
+        res,
+        409,
+        `สถานะ ${result.currentStatus} ไม่อนุญาตให้ยกเลิกเช็คอิน`,
+      );
+    }
+    return err(res, 500, 'ดำเนินการไม่สำเร็จ');
+  }
+
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: result.before.activity_id,
+    action: AUDIT.CANCEL_CHECK_IN,
+    before: {
+      registration_id: id,
+      status: 'ATTENDED',
+      evaluation_status: result.before.evaluation_status,
+    },
+    after: { registration_id: id, status: 'REGISTERED' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: id,
+    action: RA.CANCEL_CHECK_IN,
+    before: { status: 'ATTENDED', evaluation_status: result.before.evaluation_status },
+    after: { status: 'REGISTERED' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', registration_id: id });
 }
 
 export async function registrationsCsv(req, res) {

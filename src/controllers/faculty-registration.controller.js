@@ -4,10 +4,12 @@ import {
   bulkEvaluateRegistrations,
   bulkUpdateParticipantRole,
   cancelByStaff,
+  cancelStaffCheckIn,
   evaluateRegistration,
   findRegistrationWithActivity,
   isValidParticipantRole,
   listByActivity,
+  revertEvaluation,
   staffCheckInBulk,
 } from '../models/faculty-registration.model.js';
 import { findById as findActivity } from '../models/faculty-activity.model.js';
@@ -21,6 +23,10 @@ import {
   bulkCreateRegistrationAuditLog,
   REGISTRATION_AUDIT_ACTIONS as RA,
 } from '../models/registration-audit.model.js';
+import {
+  buildParticipantsWorkbook,
+  contentDispositionAttachment,
+} from '../utils/excel-participants.js';
 
 const EVALUATION_RESULTS = new Set(['PASSED', 'FAILED']);
 
@@ -445,4 +451,154 @@ export async function bulkParticipantRole(req, res) {
   }
 
   res.json({ status: 'ok', ...out });
+}
+
+// GET /api/faculty/activities/:id/registrations.xlsx
+//   ส่งออกรายชื่อผู้สมัครเป็น Excel (.xlsx)
+//   scope: ผู้สร้างกิจกรรมเท่านั้น (created_by = self) — เหมือนกับ manage flow อื่น ๆ
+//   export ทุก row (ทุก status) — ลูกข่ายค่อย filter ใน Excel ผ่าน auto-filter
+export async function exportRegistrationsXlsx(req, res) {
+  if (!req.user.faculty_id) return err(res, 403, 'บัญชีของท่านยังไม่ถูกผูกกับคณะ');
+
+  const activityId = Number(req.params.id);
+  if (!Number.isInteger(activityId) || activityId < 1)
+    return err(res, 400, 'invalid activity id');
+
+  const activity = await findActivity(activityId);
+  if (!activity) return err(res, 404, 'activity not found');
+  if (activity.created_by !== req.user.id)
+    return err(res, 403, 'ส่งออกได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
+
+  const registrations = await listByActivity(activityId);
+
+  const buffer = await buildParticipantsWorkbook({ activity, registrations });
+
+  const stamp = new Date()
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, ''); // YYYYMMDD
+  const safeCode = (activity.code ?? `id${activity.id}`).replace(
+    /[^A-Za-z0-9_-]/g,
+    '',
+  );
+  const filename = `${safeCode}_participants_${stamp}.xlsx`;
+
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  );
+  res.setHeader('Content-Disposition', contentDispositionAttachment(filename));
+  res.setHeader('Content-Length', buffer.byteLength);
+  res.end(Buffer.from(buffer));
+}
+
+// POST /api/faculty/activities/:id/registrations/:regId/cancel-check-in
+//   body: { reason: string }
+//   ยกเลิกการเช็คอิน — ATTENDED → REGISTERED + attendance.status → INVALID
+//   scope: ผู้สร้างกิจกรรมเท่านั้น
+//   block: ถ้า evaluation_status เป็น PASSED/FAILED แล้ว (กระทบชั่วโมง/cert)
+export async function cancelCheckIn(req, res) {
+  // ยอมรับ ATTENDED เท่านั้นใน ensureMutate (model ตรวจ evaluation_status ซ้ำอีกชั้น)
+  const ctx = await ensureMutate(req, res, ['ATTENDED']);
+  if (!ctx) return;
+
+  const reasonRaw = req.body?.reason;
+  if (typeof reasonRaw !== 'string' || reasonRaw.trim().length === 0) {
+    return err(res, 400, 'ต้องระบุเหตุผลในการยกเลิกเช็คอิน');
+  }
+  const reason = reasonRaw.trim().slice(0, 500);
+
+  const result = await cancelStaffCheckIn(ctx.regId);
+  if (!result.ok) {
+    if (result.reason === 'ALREADY_EVALUATED') {
+      return err(
+        res,
+        409,
+        `ประเมินแล้ว (${result.evaluationStatus}) — ยกเลิกเช็คอินไม่ได้ ต้องยกเลิกผลประเมินก่อน`,
+      );
+    }
+    if (result.reason === 'STATUS_MISMATCH') {
+      return err(
+        res,
+        409,
+        `สถานะ ${result.currentStatus} ไม่อนุญาตให้ยกเลิกเช็คอิน`,
+      );
+    }
+    return err(res, 404, 'registration not found');
+  }
+
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: ctx.reg.activity_id,
+    action: AUDIT.CANCEL_CHECK_IN,
+    before: { status: 'ATTENDED', evaluation_status: result.before.evaluation_status },
+    after: { status: 'REGISTERED', registration_id: ctx.regId },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: ctx.regId,
+    action: RA.CANCEL_CHECK_IN,
+    before: { status: 'ATTENDED', evaluation_status: result.before.evaluation_status },
+    after: { status: 'REGISTERED' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', registration_id: ctx.regId });
+}
+
+// POST /api/faculty/activities/:id/registrations/:regId/revert-evaluation
+//   body: { reason?: string } — optional, อธิบายเหตุผล
+//   ยกเลิกผลประเมิน — PASSED/FAILED → PENDING_EVALUATION + ล้าง evaluated_at/by/note
+//   scope: ผู้สร้างกิจกรรมเท่านั้น
+//   precondition (ทั้งใน controller + model): status=ATTENDED + eval=PASSED|FAILED
+//
+//   ใช้กรณี: ประเมินผิด, อยากเปลี่ยนใจก่อนตัดสินใจ final, แก้ bulk-evaluate ที่ผิดกลุ่ม
+//   หลัง revert: กลับไปประเมินใหม่ได้ + ยกเลิกเช็คอินก็ได้
+export async function revertEvalRegistration(req, res) {
+  const ctx = await ensureMutate(req, res, ['ATTENDED']);
+  if (!ctx) return;
+
+  const noteRaw = req.body?.reason;
+  const reason =
+    typeof noteRaw === 'string' && noteRaw.trim().length > 0
+      ? noteRaw.trim().slice(0, 500)
+      : null;
+
+  const updated = await revertEvaluation(ctx.regId);
+  if (!updated) {
+    return err(
+      res,
+      409,
+      `สถานะปัจจุบันไม่อนุญาตให้ยกเลิกผลประเมิน (ต้องประเมินแล้วเป็น PASSED/FAILED)`,
+    );
+  }
+
+  const previousEval = ctx.reg.evaluation_status; // PASSED หรือ FAILED
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: ctx.reg.activity_id,
+    action: AUDIT.REVERT_EVALUATION,
+    before: { evaluation_status: previousEval },
+    after: {
+      registration_id: ctx.regId,
+      user_id: ctx.reg.user_id,
+      evaluation_status: 'PENDING_EVALUATION',
+    },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: ctx.regId,
+    action: RA.REVERT_EVALUATION,
+    before: { evaluation_status: previousEval },
+    after: { evaluation_status: 'PENDING_EVALUATION' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', registration: updated });
 }

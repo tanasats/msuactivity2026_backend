@@ -20,7 +20,9 @@ export const ACTIVITY_AUDIT_ACTIONS = Object.freeze({
   APPROVE_REGISTRATION: 'approve_registration',           // อนุมัติผู้สมัคร 1 คน (faculty)
   CANCEL_REGISTRATION: 'cancel_registration',             // ยกเลิกผู้สมัคร (faculty / admin)
   EVALUATE_REGISTRATION: 'evaluate_registration',         // ประเมินผู้สมัคร 1 คน
+  REVERT_EVALUATION: 'revert_evaluation',                 // ยกเลิกผลประเมิน (PASSED/FAILED → PENDING)
   STAFF_CHECK_IN: 'staff_check_in',                       // เจ้าหน้าที่ check-in แทน (single/bulk)
+  CANCEL_CHECK_IN: 'cancel_check_in',                     // ยกเลิกการเช็คอิน (revert ATTENDED → REGISTERED)
   BULK_ADD_REGISTRATION: 'bulk_add_registration',         // เพิ่มผู้สมัครทีละหลายคน (faculty/admin)
   BULK_APPROVE_REGISTRATION: 'bulk_approve_registration', // admin อนุมัติผู้สมัครหลายคน
   BULK_EVALUATE_REGISTRATION: 'bulk_evaluate_registration', // ประเมินหลายคน (faculty/admin)

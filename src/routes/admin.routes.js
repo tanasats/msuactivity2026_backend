@@ -33,6 +33,7 @@ import {
   listRegistrations,
   registrationsCsv,
   cancelRegistration as adminCancelRegistration,
+  cancelCheckIn as adminCancelCheckIn,
   registrationAuditLog,
 } from '../controllers/admin-student.controller.js';
 import {
@@ -100,6 +101,12 @@ router.post(
 router.get(
   '/registrations/:id/audit',
   asyncHandler(registrationAuditLog),
+);
+// ยกเลิกการเช็คอิน — super_admin only (admin ไม่ได้ — เสี่ยง fraud + ห่าง context)
+router.post(
+  '/registrations/:id/cancel-check-in',
+  requireRole('super_admin'),
+  asyncHandler(adminCancelCheckIn),
 );
 
 // super_admin only — จัดการผู้สมัครรายกิจกรรม (cross-faculty) รับ msu_ids

@@ -18,13 +18,14 @@ export const REGISTRATION_AUDIT_ACTIONS = Object.freeze({
   CANCEL_BY_USER: 'cancel_by_user',     // student self-cancel (PENDING เท่านั้น)
   CANCEL_BY_STAFF: 'cancel_by_staff',   // faculty/admin cancel (PENDING หรือ REGISTERED)
 
-  // ── attendance ─────────────────────────────────────────────
-  CHECK_IN: 'check_in',                 // student self check-in (QR/selfie) — actor = student
+  // ── attendance ─────────────────────────────────────────────  CHECK_IN: 'check_in',                 // student self check-in (QR/selfie) — actor = student
   STAFF_CHECK_IN: 'staff_check_in',     // staff manual check-in แทนนิสิต — actor = staff
+  CANCEL_CHECK_IN: 'cancel_check_in',   // ยกเลิกเช็คอิน (revert ATTENDED → REGISTERED)
   NO_SHOW: 'no_show',                   // (reserved — ยังไม่ implement) mark no-show
 
   // ── post-attendance ────────────────────────────────────────
   EVALUATE: 'evaluate',                 // PASSED / FAILED — note บอกผล
+  REVERT_EVALUATION: 'revert_evaluation', // ยกเลิกผลประเมิน (PASSED/FAILED → PENDING)
   CHANGE_ROLE: 'change_role',           // เปลี่ยน participant_role
 });
 
