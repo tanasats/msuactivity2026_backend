@@ -5,6 +5,7 @@ import {
   listMyAcademicYears,
   listMyRegistrations,
 } from '../models/student-registration.model.js';
+import { getStudentAggregateStats } from '../models/admin-student.model.js';
 import { listByRegistrations } from '../models/registration-photo.model.js';
 import {
   createRegistrationAuditLog,
@@ -61,8 +62,18 @@ export async function myRegistrations(req, res) {
 
 export async function stats(req, res) {
   const academicYear = parseAcademicYear(req.query.academic_year);
+  // year-filtered: hours_total, loan_hours_total, activities_count (สำหรับการ์ดที่กรองตามปี — ถ้า UI ใช้)
   const data = await getStudentStats(req.user.id, academicYear);
   res.json({ ...data, academic_year: academicYear });
+}
+
+// GET /api/student/aggregate-stats
+//   คืน overall + by_year + by_category + by_skill (rollup parent)
+//   ใช้กับ student dashboard ที่แสดง charts รวมข้ามปี (เหมือนกับ admin student detail)
+//   reuse model จาก admin-student (เพราะ logic เดียวกัน — แค่ scope user_id = req.user.id)
+export async function aggregateStats(req, res) {
+  const data = await getStudentAggregateStats(req.user.id);
+  res.json(data);
 }
 
 // GET /api/student/academic-years

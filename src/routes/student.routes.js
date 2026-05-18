@@ -4,6 +4,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { requireAuth, requireRole } from '../middlewares/auth.middleware.js';
 import {
   academicYears,
+  aggregateStats,
   cancel,
   myRegistrations,
   register,
@@ -34,6 +35,7 @@ router.use(requireAuth);
 router.use(requireRole('student'));
 
 router.get('/stats', asyncHandler(stats));
+router.get('/aggregate-stats', asyncHandler(aggregateStats));
 router.get('/academic-years', asyncHandler(academicYears));
 router.get('/registrations', asyncHandler(myRegistrations));
 router.post('/registrations', asyncHandler(register));
