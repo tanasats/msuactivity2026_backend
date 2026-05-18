@@ -73,6 +73,7 @@ export async function getStudentStats(userId, academicYear = null) {
      FROM registrations r
      JOIN activities a ON a.id = r.activity_id
      WHERE r.user_id = $1
+       AND r.status = 'ATTENDED'
        AND r.evaluation_status = 'PASSED'${yearFilter}`,
     params,
   );

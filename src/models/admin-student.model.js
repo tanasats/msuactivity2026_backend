@@ -17,9 +17,10 @@ const STUDENT_LIST_COLS = `
   u.faculty_name,
   u.picture_url,
   u.last_login_at,
-  COALESCE(SUM(a.hours)      FILTER (WHERE r.evaluation_status = 'PASSED'), 0) AS hours_total,
-  COALESCE(SUM(a.loan_hours) FILTER (WHERE r.evaluation_status = 'PASSED'), 0) AS loan_hours_total,
-  COUNT(*) FILTER (WHERE r.evaluation_status = 'PASSED')::int  AS passed_count,
+  -- defensive: นับเฉพาะ row ที่ยัง ATTENDED ด้วย — กัน orphan eval data ของ row ที่ถูก cancel ไปแล้ว
+  COALESCE(SUM(a.hours)      FILTER (WHERE r.evaluation_status = 'PASSED' AND r.status = 'ATTENDED'), 0) AS hours_total,
+  COALESCE(SUM(a.loan_hours) FILTER (WHERE r.evaluation_status = 'PASSED' AND r.status = 'ATTENDED'), 0) AS loan_hours_total,
+  COUNT(*) FILTER (WHERE r.evaluation_status = 'PASSED' AND r.status = 'ATTENDED')::int  AS passed_count,
   COUNT(*) FILTER (
     WHERE r.status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED','NO_SHOW')
   )::int AS registrations_count
@@ -84,14 +85,15 @@ export async function listStudents({
 // stats per academic_year + per category (สำหรับ drill-down detail)
 //   ดูภาพรวม + ดูแยกปี + ดูแยกหมวด
 export async function getStudentAggregateStats(userId) {
-  const [overall, byYear, byCategory] = await Promise.all([
+  const [overall, byYear, byCategory, bySkill] = await Promise.all([
     query(
       `SELECT
-         COALESCE(SUM(a.hours)      FILTER (WHERE r.evaluation_status='PASSED'), 0) AS hours_total,
-         COALESCE(SUM(a.loan_hours) FILTER (WHERE r.evaluation_status='PASSED'), 0) AS loan_hours_total,
-         COUNT(*) FILTER (WHERE r.evaluation_status='PASSED')::int AS passed_count,
-         COUNT(*) FILTER (WHERE r.evaluation_status='FAILED')::int AS failed_count,
-         COUNT(*) FILTER (WHERE r.evaluation_status='PENDING_EVALUATION')::int AS pending_eval_count,
+         -- defensive: filter status='ATTENDED' กัน orphan eval ของ cancelled rows
+         COALESCE(SUM(a.hours)      FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED'), 0) AS hours_total,
+         COALESCE(SUM(a.loan_hours) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED'), 0) AS loan_hours_total,
+         COUNT(*) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED')::int AS passed_count,
+         COUNT(*) FILTER (WHERE r.evaluation_status='FAILED' AND r.status='ATTENDED')::int AS failed_count,
+         COUNT(*) FILTER (WHERE r.evaluation_status='PENDING_EVALUATION' AND r.status='ATTENDED')::int AS pending_eval_count,
          COUNT(*) FILTER (WHERE r.status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED','NO_SHOW'))::int AS active_count
        FROM registrations r
        JOIN activities a ON a.id = r.activity_id
@@ -101,9 +103,9 @@ export async function getStudentAggregateStats(userId) {
     query(
       `SELECT
          a.academic_year,
-         COALESCE(SUM(a.hours)      FILTER (WHERE r.evaluation_status='PASSED'), 0) AS hours,
-         COALESCE(SUM(a.loan_hours) FILTER (WHERE r.evaluation_status='PASSED'), 0) AS loan_hours,
-         COUNT(*) FILTER (WHERE r.evaluation_status='PASSED')::int AS passed_count
+         COALESCE(SUM(a.hours)      FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED'), 0) AS hours,
+         COALESCE(SUM(a.loan_hours) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED'), 0) AS loan_hours,
+         COUNT(*) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED')::int AS passed_count
        FROM registrations r
        JOIN activities a ON a.id = r.activity_id
        WHERE r.user_id = $1
@@ -116,8 +118,8 @@ export async function getStudentAggregateStats(userId) {
          c.id   AS category_id,
          c.code AS category_code,
          c.name AS category_name,
-         COALESCE(SUM(a.hours) FILTER (WHERE r.evaluation_status='PASSED'), 0) AS hours,
-         COUNT(*) FILTER (WHERE r.evaluation_status='PASSED')::int AS passed_count
+         COALESCE(SUM(a.hours) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED'), 0) AS hours,
+         COUNT(*) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED')::int AS passed_count
        FROM activity_categories c
        LEFT JOIN activities a ON a.category_id = c.id
        LEFT JOIN registrations r ON r.activity_id = a.id AND r.user_id = $1
@@ -125,11 +127,38 @@ export async function getStudentAggregateStats(userId) {
        ORDER BY c.code ASC`,
       [userId],
     ),
+    // by_skill: ทักษะที่นิสิตได้รับสะสมข้ามปี (rollup ระดับ parent)
+    //   - LEFT JOIN จาก skills root → เห็นทุกทักษะแม้ count=0 (นิสิตยังไม่เคยได้รับ)
+    //   - COALESCE(s.parent_id, s.id) = root id — รองรับทั้ง legacy (ผูก parent ตรง) + new (ผูก child)
+    //   - filter ATTENDED + PASSED (สอดคล้องกับ hours_total) + user คนนี้
+    query(
+      `SELECT
+         root.id   AS skill_id,
+         root.code AS skill_code,
+         root.name AS skill_name,
+         -- count + hours เฉพาะกรณีที่ user ลงทะเบียน + ATTENDED + PASSED จริง (FILTER)
+         COUNT(DISTINCT a.id) FILTER (WHERE r.id IS NOT NULL)::int AS count,
+         COALESCE(SUM(a.hours) FILTER (WHERE r.id IS NOT NULL), 0) AS hours
+       FROM skills root
+       LEFT JOIN skills s ON COALESCE(s.parent_id, s.id) = root.id
+       LEFT JOIN activity_skills aks ON aks.skill_id = s.id
+       LEFT JOIN activities a ON a.id = aks.activity_id
+       LEFT JOIN registrations r ON r.activity_id = a.id
+        AND r.user_id = $1
+        AND r.status = 'ATTENDED'
+        AND r.evaluation_status = 'PASSED'
+       WHERE root.parent_id IS NULL
+         AND root.is_active = true
+       GROUP BY root.id, root.code, root.name
+       ORDER BY root.code ASC`,
+      [userId],
+    ),
   ]);
   return {
     overall: overall.rows[0],
     by_year: byYear.rows,
     by_category: byCategory.rows,
+    by_skill: bySkill.rows,
   };
 }
 
@@ -172,13 +201,13 @@ export async function listStudentRegistrations(userId) {
 // admin/super_admin ยกเลิกการลงทะเบียนได้ — bypass scope ของ faculty
 //   - เปลี่ยน status → CANCELLED_BY_STAFF, บันทึก cancelled_at/by + cancel_reason
 //   - คืน slot ใน activities.registered_count (ลด 1, GREATEST(...,0) กัน negative)
-//   - "yank" ได้ทุก status ที่ active: PENDING_APPROVAL | REGISTERED | ATTENDED
-//     (ATTENDED — admin override, สอดคล้อง use case "นิสิตขอลบเข้าร่วม")
-//   คืน { ok, activity_id } | { ok: false, reason: 'NOT_FOUND' | 'ALREADY_CANCELLED' }
+//   - cancelable เฉพาะ status ที่ "ไม่มี side effects" คือ PENDING_APPROVAL + REGISTERED
+//   - ATTENDED ต้องผ่าน chain action ก่อน (revert-evaluation → cancel-check-in → cancel)
+//     เพื่อกัน orphan data (eval row ค้างอยู่หลัง cancel → stats นับชั่วโมงผิด)
+//   คืน { ok, activity_id } | { ok: false, reason: 'NOT_FOUND' | 'STATUS_MISMATCH' }
 const ADMIN_CANCELABLE = new Set([
   'PENDING_APPROVAL',
   'REGISTERED',
-  'ATTENDED',
 ]);
 
 export async function adminCancelRegistration(registrationId, actorId, reason) {
@@ -196,7 +225,7 @@ export async function adminCancelRegistration(registrationId, actorId, reason) {
     }
     if (!ADMIN_CANCELABLE.has(cur[0].status)) {
       await client.query('ROLLBACK');
-      return { ok: false, reason: 'ALREADY_CANCELLED', currentStatus: cur[0].status };
+      return { ok: false, reason: 'STATUS_MISMATCH', currentStatus: cur[0].status };
     }
     const before = cur[0];
     await client.query(

@@ -10,7 +10,10 @@ import {
   listAuditForRegistration,
   REGISTRATION_AUDIT_ACTIONS as RA,
 } from '../models/registration-audit.model.js';
-import { cancelStaffCheckIn } from '../models/faculty-registration.model.js';
+import {
+  cancelStaffCheckIn,
+  revertEvaluation,
+} from '../models/faculty-registration.model.js';
 import { rowsToCsv, sendCsv } from '../utils/csv.js';
 
 const DEFAULT_LIMIT = 50;
@@ -237,6 +240,14 @@ export async function cancelRegistration(req, res) {
   const result = await model.adminCancelRegistration(id, req.user.id, reason);
   if (!result.ok) {
     if (result.reason === 'NOT_FOUND') return err(res, 404, 'registration not found');
+    // ATTENDED → ห้าม cancel ตรง — แนะนำให้ใช้ flow chain
+    if (result.currentStatus === 'ATTENDED') {
+      return err(
+        res,
+        409,
+        'นิสิตเช็คอินแล้ว — โปรดยกเลิกผลประเมิน (ถ้ามี) แล้ว "ยกเลิกเช็คอิน" ก่อน จึงจะยกเลิกการลงทะเบียนได้',
+      );
+    }
     return err(
       res,
       409,
@@ -330,6 +341,56 @@ export async function cancelCheckIn(req, res) {
     action: RA.CANCEL_CHECK_IN,
     before: { status: 'ATTENDED', evaluation_status: result.before.evaluation_status },
     after: { status: 'REGISTERED' },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', registration_id: id });
+}
+
+// POST /api/admin/registrations/:id/revert-evaluation
+//   body: { reason?: string } — optional
+//   super_admin only (gate ที่ route)
+//   ยกเลิกผลประเมิน (PASSED/FAILED → PENDING_EVALUATION) + ล้าง evaluated_at/by/note
+//   reuse model จาก faculty-registration.model.js (CTE คืน previous_evaluation มาด้วย)
+export async function revertEval(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const noteRaw = req.body?.reason;
+  const reason =
+    typeof noteRaw === 'string' && noteRaw.trim().length > 0
+      ? noteRaw.trim().slice(0, 500)
+      : null;
+
+  const updated = await revertEvaluation(id);
+  if (!updated) {
+    return err(
+      res,
+      409,
+      `ยกเลิกผลประเมินไม่สำเร็จ — registration ต้องอยู่สถานะ ATTENDED + PASSED/FAILED`,
+    );
+  }
+
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: updated.activity_id,
+    action: AUDIT.REVERT_EVALUATION,
+    before: { evaluation_status: updated.previous_evaluation },
+    after: {
+      registration_id: id,
+      user_id: updated.user_id,
+      evaluation_status: 'PENDING_EVALUATION',
+    },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+  await createRegistrationAuditLog({
+    actor_id: req.user.id,
+    registration_id: id,
+    action: RA.REVERT_EVALUATION,
+    before: { evaluation_status: updated.previous_evaluation },
+    after: { evaluation_status: 'PENDING_EVALUATION' },
     note: reason,
     ...auditMetaFromReq(req),
   });

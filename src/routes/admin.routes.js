@@ -34,6 +34,7 @@ import {
   registrationsCsv,
   cancelRegistration as adminCancelRegistration,
   cancelCheckIn as adminCancelCheckIn,
+  revertEval as adminRevertEval,
   registrationAuditLog,
 } from '../controllers/admin-student.controller.js';
 import {
@@ -93,8 +94,11 @@ router.get('/students/:id', asyncHandler(studentDetail));
 router.get('/students/:id/registrations.csv', asyncHandler(studentRegistrationsCsv));
 router.get('/registrations', asyncHandler(listRegistrations));
 router.get('/registrations.csv', asyncHandler(registrationsCsv));
+// cancel registration — super_admin only (admin ห่าง context, เสี่ยง fraud)
+//   อนุญาตเฉพาะ PENDING_APPROVAL + REGISTERED (ATTENDED ต้องผ่าน chain)
 router.post(
   '/registrations/:id/cancel',
+  requireRole('super_admin'),
   asyncHandler(adminCancelRegistration),
 );
 // audit timeline ของ registration เฉพาะ row — admin + super_admin (read-only)
@@ -107,6 +111,12 @@ router.post(
   '/registrations/:id/cancel-check-in',
   requireRole('super_admin'),
   asyncHandler(adminCancelCheckIn),
+);
+// ยกเลิกผลประเมิน (PASSED/FAILED → PENDING_EVAL) — super_admin only
+router.post(
+  '/registrations/:id/revert-evaluation',
+  requireRole('super_admin'),
+  asyncHandler(adminRevertEval),
 );
 
 // super_admin only — จัดการผู้สมัครรายกิจกรรม (cross-faculty) รับ msu_ids

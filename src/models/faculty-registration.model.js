@@ -168,17 +168,27 @@ export async function cancelStaffCheckIn(registrationId) {
 //   set: evaluation_status = 'PENDING_EVALUATION' (เหมือนเพิ่งเช็คอินใหม่ ๆ)
 //   คืน updated row หรือ null ถ้า precondition ไม่ตรง
 export async function revertEvaluation(registrationId) {
+  // ใช้ CTE เพื่อ atomic + คืน previousEval (RETURNING ของ UPDATE คืนค่าหลัง update เท่านั้น)
   const { rows } = await query(
-    `UPDATE registrations
-        SET evaluation_status = 'PENDING_EVALUATION',
-            evaluation_note   = NULL,
-            evaluated_at      = NULL,
-            evaluated_by      = NULL,
-            updated_at        = now()
-      WHERE id = $1
-        AND status = 'ATTENDED'
-        AND evaluation_status IN ('PASSED', 'FAILED')
-      RETURNING id, status, evaluation_status, activity_id, user_id`,
+    `WITH before AS (
+       SELECT id, evaluation_status AS prev_eval
+         FROM registrations
+        WHERE id = $1
+     ), upd AS (
+       UPDATE registrations
+          SET evaluation_status = 'PENDING_EVALUATION',
+              evaluation_note   = NULL,
+              evaluated_at      = NULL,
+              evaluated_by      = NULL,
+              updated_at        = now()
+        WHERE id = $1
+          AND status = 'ATTENDED'
+          AND evaluation_status IN ('PASSED', 'FAILED')
+        RETURNING id, status, evaluation_status, activity_id, user_id
+     )
+     SELECT upd.id, upd.status, upd.evaluation_status,
+            upd.activity_id, upd.user_id, before.prev_eval AS previous_evaluation
+       FROM upd JOIN before ON before.id = upd.id`,
     [registrationId],
   );
   return rows[0] ?? null;
