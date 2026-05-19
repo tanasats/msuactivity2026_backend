@@ -39,6 +39,8 @@ export async function add(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
 
   const added = await addInterest(req.user.id, activityId);
   res.status(added ? 201 : 200).json({ status: 'ok', added });

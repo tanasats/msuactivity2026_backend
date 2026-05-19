@@ -84,7 +84,13 @@ export async function listStudents({
 
 // stats per academic_year + per category (สำหรับ drill-down detail)
 //   ดูภาพรวม + ดูแยกปี + ดูแยกหมวด
-export async function getStudentAggregateStats(userId) {
+export async function getStudentAggregateStats(userId, { includeDeleted = true } = {}) {
+  // exclude soft-deleted activities ทุกที่ที่ JOIN activities a
+  //   (student view: includeDeleted=false; admin view: true — เห็นความจริง)
+  const actDel = includeDeleted ? '' : ` AND a.status != 'DELETED'`;
+  // by_skill: JOIN activities a มาทาง activity_skills + ตรวจ deleted ใน JOIN เอง
+  //   (ไม่ใช้ WHERE เพราะมันเป็น LEFT JOIN — ต้องอยู่ใน ON ไม่งั้นจะตัด root ที่ count=0)
+  const actDelOnSkill = includeDeleted ? '' : ` AND a.status != 'DELETED'`;
   const [overall, byYear, byCategory, bySkill] = await Promise.all([
     query(
       `SELECT
@@ -97,7 +103,7 @@ export async function getStudentAggregateStats(userId) {
          COUNT(*) FILTER (WHERE r.status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED','NO_SHOW'))::int AS active_count
        FROM registrations r
        JOIN activities a ON a.id = r.activity_id
-       WHERE r.user_id = $1`,
+       WHERE r.user_id = $1${actDel}`,
       [userId],
     ),
     query(
@@ -108,7 +114,7 @@ export async function getStudentAggregateStats(userId) {
          COUNT(*) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED')::int AS passed_count
        FROM registrations r
        JOIN activities a ON a.id = r.activity_id
-       WHERE r.user_id = $1
+       WHERE r.user_id = $1${actDel}
        GROUP BY a.academic_year
        ORDER BY a.academic_year DESC`,
       [userId],
@@ -121,7 +127,7 @@ export async function getStudentAggregateStats(userId) {
          COALESCE(SUM(a.hours) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED'), 0) AS hours,
          COUNT(*) FILTER (WHERE r.evaluation_status='PASSED' AND r.status='ATTENDED')::int AS passed_count
        FROM activity_categories c
-       LEFT JOIN activities a ON a.category_id = c.id
+       LEFT JOIN activities a ON a.category_id = c.id${actDel}
        LEFT JOIN registrations r ON r.activity_id = a.id AND r.user_id = $1
        GROUP BY c.id, c.code, c.name
        ORDER BY c.code ASC`,
@@ -142,7 +148,7 @@ export async function getStudentAggregateStats(userId) {
        FROM skills root
        LEFT JOIN skills s ON COALESCE(s.parent_id, s.id) = root.id
        LEFT JOIN activity_skills aks ON aks.skill_id = s.id
-       LEFT JOIN activities a ON a.id = aks.activity_id
+       LEFT JOIN activities a ON a.id = aks.activity_id${actDelOnSkill}
        LEFT JOIN registrations r ON r.activity_id = a.id
         AND r.user_id = $1
         AND r.status = 'ATTENDED'
@@ -162,8 +168,21 @@ export async function getStudentAggregateStats(userId) {
   };
 }
 
-// registrations ของนิสิตคนหนึ่ง — ใช้ทั้งหน้า detail และ CSV export
-export async function listStudentRegistrations(userId) {
+// registrations ของนิสิตคนหนึ่ง — ใช้ทั้งหน้า detail (admin), CSV export, และ student self-export
+//   includeDeleted=true (default): admin เห็น registrations ทั้งหมด รวมที่ activity ถูกลบ (มี badge)
+//   includeDeleted=false:           student export ของตัวเอง — ตัดกิจกรรมที่ถูกลบออก
+//   academicYear (BE) optional:     filter เฉพาะปีนั้น
+export async function listStudentRegistrations(
+  userId,
+  { includeDeleted = true, academicYear = null } = {},
+) {
+  const where = ['r.user_id = $1'];
+  const params = [userId];
+  if (!includeDeleted) where.push(`a.status != 'DELETED'`);
+  if (academicYear !== null) {
+    params.push(academicYear);
+    where.push(`a.academic_year = $${params.length}`);
+  }
   const { rows } = await query(
     `SELECT
        r.id                 AS registration_id,
@@ -191,9 +210,9 @@ export async function listStudentRegistrations(userId) {
      JOIN activity_categories c   ON c.id = a.category_id
      JOIN organizations o         ON o.id = a.organization_id
      LEFT JOIN faculties f        ON f.id = a.faculty_id
-    WHERE r.user_id = $1
+    WHERE ${where.join(' AND ')}
     ORDER BY r.registered_at DESC, r.id DESC`,
-    [userId],
+    params,
   );
   return rows;
 }

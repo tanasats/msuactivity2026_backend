@@ -44,6 +44,10 @@ async function ensureMutable(req, res) {
     err(res, 404, 'activity not found');
     return null;
   }
+  if (activity.status === 'DELETED') {
+    err(res, 409, 'กิจกรรมถูกลบแล้ว');
+    return null;
+  }
   if (activity.created_by !== req.user.id) {
     err(res, 403, 'จัดการเอกสารได้เฉพาะผู้สร้างกิจกรรม');
     return null;

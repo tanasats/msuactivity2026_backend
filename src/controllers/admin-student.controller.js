@@ -90,8 +90,10 @@ export async function studentDetail(req, res) {
   if (user.role !== 'student')
     return err(res, 400, 'user นี้ไม่ใช่ role student');
 
+  // stats ไม่รวมกิจกรรมที่ถูกลบ — ให้ตัวเลขตรงกับที่นิสิตเห็นใน dashboard ของตัวเอง
+  //   (รายการ registrations ด้านล่างยังคงรวม + แสดง badge 'ถูกลบ' เพื่อให้ admin investigate ได้)
   const [stats, registrations] = await Promise.all([
-    model.getStudentAggregateStats(id),
+    model.getStudentAggregateStats(id, { includeDeleted: false }),
     model.listStudentRegistrations(id),
   ]);
 

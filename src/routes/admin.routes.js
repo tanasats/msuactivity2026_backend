@@ -8,11 +8,14 @@ import {
   auditLog,
   bulkApprove,
   bulkReject,
+  deleteImpact,
   detail,
   list,
   reject,
+  restore,
   setCreator,
   setStatus,
+  softDelete,
   stats,
 } from '../controllers/admin-activity.controller.js';
 import {
@@ -73,6 +76,26 @@ router.patch(
   '/activities/:id/creator',
   requireRole('super_admin'),
   asyncHandler(setCreator),
+);
+
+// soft delete + restore (super_admin only)
+//   - delete-impact: preview ผลกระทบก่อน confirm (จำนวนนิสิต / ชั่วโมงที่จะหาย)
+//   - soft-delete:   status → DELETED + เก็บ previous_status ไว้ restore
+//   - restore:       กู้คืน status เดิม
+router.get(
+  '/activities/:id/delete-impact',
+  requireRole('super_admin'),
+  asyncHandler(deleteImpact),
+);
+router.post(
+  '/activities/:id/soft-delete',
+  requireRole('super_admin'),
+  asyncHandler(softDelete),
+);
+router.post(
+  '/activities/:id/restore',
+  requireRole('super_admin'),
+  asyncHandler(restore),
 );
 
 // system settings — super_admin เท่านั้น (รวม academic_year, check-in window ฯลฯ)

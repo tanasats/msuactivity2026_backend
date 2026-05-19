@@ -47,7 +47,8 @@ export async function listMyRegistrations(userId, academicYear = null) {
        JOIN activity_categories c   ON c.id = a.category_id
        JOIN organizations o         ON o.id = a.organization_id
       WHERE r.user_id = $1
-        AND r.status IN ('PENDING_APPROVAL', 'REGISTERED', 'ATTENDED', 'NO_SHOW')${yearFilter}
+        AND r.status IN ('PENDING_APPROVAL', 'REGISTERED', 'ATTENDED', 'NO_SHOW')
+        AND a.status != 'DELETED'${yearFilter}
       ORDER BY a.start_at ASC`,
     params,
   );
@@ -74,7 +75,8 @@ export async function getStudentStats(userId, academicYear = null) {
      JOIN activities a ON a.id = r.activity_id
      WHERE r.user_id = $1
        AND r.status = 'ATTENDED'
-       AND r.evaluation_status = 'PASSED'${yearFilter}`,
+       AND r.evaluation_status = 'PASSED'
+       AND a.status != 'DELETED'${yearFilter}`,
     params,
   );
   // pg numeric parser แปลง decimal → number; count return เป็น string ของ bigint → cast
@@ -95,6 +97,7 @@ export async function listMyAcademicYears(userId) {
        JOIN activities a ON a.id = r.activity_id
       WHERE r.user_id = $1
         AND r.status IN ('PENDING_APPROVAL', 'REGISTERED', 'ATTENDED', 'NO_SHOW')
+        AND a.status != 'DELETED'
       ORDER BY a.academic_year DESC`,
     [userId],
   );

@@ -49,6 +49,10 @@ async function ensureOwnerAndPassed(req, res) {
     err(res, 403, 'จัดการรูปได้เฉพาะ registration ของท่านเอง');
     return null;
   }
+  if (reg.activity_status === 'DELETED') {
+    err(res, 409, 'กิจกรรมถูกลบแล้ว');
+    return null;
+  }
   if (reg.evaluation_status !== 'PASSED') {
     err(
       res,

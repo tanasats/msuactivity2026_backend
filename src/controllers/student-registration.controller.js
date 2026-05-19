@@ -5,7 +5,10 @@ import {
   listMyAcademicYears,
   listMyRegistrations,
 } from '../models/student-registration.model.js';
-import { getStudentAggregateStats } from '../models/admin-student.model.js';
+import {
+  getStudentAggregateStats,
+  listStudentRegistrations,
+} from '../models/admin-student.model.js';
 import { listByRegistrations } from '../models/registration-photo.model.js';
 import {
   createRegistrationAuditLog,
@@ -14,6 +17,7 @@ import {
 } from '../models/registration-audit.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
+import { rowsToCsv, sendCsv } from '../utils/csv.js';
 
 // helper: parse + validate academic_year query param (รับเฉพาะ พ.ศ. 4 หลัก)
 function parseAcademicYear(raw) {
@@ -72,8 +76,45 @@ export async function stats(req, res) {
 //   ใช้กับ student dashboard ที่แสดง charts รวมข้ามปี (เหมือนกับ admin student detail)
 //   reuse model จาก admin-student (เพราะ logic เดียวกัน — แค่ scope user_id = req.user.id)
 export async function aggregateStats(req, res) {
-  const data = await getStudentAggregateStats(req.user.id);
+  // นิสิตไม่ควรเห็นกิจกรรมที่ถูกลบ → ตัดออกจากทั้ง overall + by_year + by_category + by_skill
+  //   (admin ดูสถิติของนิสิตคนเดียวกัน → เรียกแบบ default includeDeleted=true เห็น "ความจริง")
+  const data = await getStudentAggregateStats(req.user.id, { includeDeleted: false });
   res.json(data);
+}
+
+// GET /api/student/registrations.csv?academic_year=
+//   นิสิต export ข้อมูลกิจกรรมของตัวเอง (CSV)
+//   - ตัดกิจกรรมที่ถูกลบออก (ตรงกับสิ่งที่เห็นใน dashboard)
+//   - optional academic_year filter (ตามที่เลือกใน UI)
+//   - column set เดียวกับ admin export เพื่อ consistent
+const STUDENT_REG_CSV_COLS = [
+  { key: 'activity_code',         label: 'รหัสกิจกรรม' },
+  { key: 'activity_title',        label: 'ชื่อกิจกรรม' },
+  { key: 'academic_year',         label: 'ปีการศึกษา' },
+  { key: 'semester',              label: 'ภาค' },
+  { key: 'category_name',         label: 'หมวด' },
+  { key: 'organization_name',     label: 'หน่วยงาน' },
+  { key: 'activity_faculty_name', label: 'คณะที่จัด' },
+  { key: 'registration_status',   label: 'สถานะลงทะเบียน' },
+  { key: 'evaluation_status',     label: 'ผลประเมิน' },
+  { key: 'hours',                 label: 'ชั่วโมง' },
+  { key: 'loan_hours',            label: 'ชม. กยศ' },
+  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ' },
+  { key: 'attended_at',           label: 'เช็คอินเมื่อ' },
+];
+
+export async function myRegistrationsCsv(req, res) {
+  const academicYear = parseAcademicYear(req.query.academic_year);
+  const rows = await listStudentRegistrations(req.user.id, {
+    includeDeleted: false,
+    academicYear,
+  });
+  const csv = rowsToCsv(rows, STUDENT_REG_CSV_COLS);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const yearSuffix = academicYear ? `-${academicYear}` : '';
+  const idLabel = req.user.msu_id || req.user.id;
+  const filename = `my-activities-${idLabel}${yearSuffix}-${stamp}.csv`;
+  sendCsv(res, filename, csv);
 }
 
 // GET /api/student/academic-years

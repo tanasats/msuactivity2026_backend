@@ -495,6 +495,7 @@ export async function update(req, res) {
 
   const existing = await activities.findById(id);
   if (!existing) return notFound(res);
+  if (existing.status === 'DELETED') return conflict(res, 'กิจกรรมถูกลบแล้ว');
   if (existing.created_by_faculty_id !== req.user.faculty_id)
     return forbidden(res, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
   if (existing.created_by !== req.user.id)
@@ -650,6 +651,7 @@ export async function updateLimited(req, res) {
 
   const existing = await activities.findById(id);
   if (!existing) return notFound(res);
+  if (existing.status === 'DELETED') return conflict(res, 'กิจกรรมถูกลบแล้ว');
   if (existing.created_by_faculty_id !== req.user.faculty_id)
     return forbidden(res, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
   if (existing.created_by !== req.user.id)
@@ -711,6 +713,7 @@ export async function submit(req, res) {
 
   const existing = await activities.findById(id);
   if (!existing) return notFound(res);
+  if (existing.status === 'DELETED') return conflict(res, 'กิจกรรมถูกลบแล้ว');
   if (existing.created_by_faculty_id !== req.user.faculty_id)
     return forbidden(res, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
   if (existing.created_by !== req.user.id)
@@ -775,6 +778,7 @@ export async function complete(req, res) {
 
   const existing = await activities.findById(id);
   if (!existing) return notFound(res);
+  if (existing.status === 'DELETED') return conflict(res, 'กิจกรรมถูกลบแล้ว');
   if (existing.created_by_faculty_id !== req.user.faculty_id)
     return forbidden(res, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
   if (existing.created_by !== req.user.id)

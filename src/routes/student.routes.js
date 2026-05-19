@@ -7,6 +7,7 @@ import {
   aggregateStats,
   cancel,
   myRegistrations,
+  myRegistrationsCsv,
   register,
   stats,
 } from '../controllers/student-registration.controller.js';
@@ -38,6 +39,8 @@ router.get('/stats', asyncHandler(stats));
 router.get('/aggregate-stats', asyncHandler(aggregateStats));
 router.get('/academic-years', asyncHandler(academicYears));
 router.get('/registrations', asyncHandler(myRegistrations));
+// .csv ต้องมาก่อน /:id ไม่งั้น Express จะแปล "registrations.csv" → :id="csv"
+router.get('/registrations.csv', asyncHandler(myRegistrationsCsv));
 router.post('/registrations', asyncHandler(register));
 router.post('/registrations/:id/cancel', asyncHandler(cancel));
 

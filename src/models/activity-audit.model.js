@@ -15,6 +15,8 @@ export const ACTIVITY_AUDIT_ACTIONS = Object.freeze({
   EDIT_ADMIN: 'edit_admin',          // admin edit fields ของกิจกรรม (override)
   BULK_APPROVE: 'bulk_approve',      // bulk approve activity (1 row ต่อกิจกรรม)
   BULK_REJECT: 'bulk_reject',        // bulk reject activity (1 row ต่อกิจกรรม)
+  DELETE: 'delete',                  // super_admin: soft-delete (status → DELETED, เก็บ previous_status)
+  RESTORE: 'restore',                // super_admin: กู้คืน (DELETED → previous_status)
 
   // ── registration lifecycle ───────────────────────────────────
   APPROVE_REGISTRATION: 'approve_registration',           // อนุมัติผู้สมัคร 1 คน (faculty)

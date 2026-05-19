@@ -66,9 +66,13 @@ export async function removeInterest(userId, activityId) {
 }
 
 // คืน list activity_ids ที่ user สนใจ — ใช้ตอน detail page เช็ค is_interested_by_me
+//   filter activity ที่ถูกลบออก (นิสิตไม่เห็น → ไม่ควรถูกบ่งบอกว่ายัง "สนใจ" อยู่)
 export async function listInterestedActivityIds(userId) {
   const { rows } = await query(
-    `SELECT activity_id FROM activity_interests WHERE user_id = $1`,
+    `SELECT ai.activity_id
+       FROM activity_interests ai
+       JOIN activities a ON a.id = ai.activity_id
+      WHERE ai.user_id = $1 AND a.status != 'DELETED'`,
     [userId],
   );
   return rows.map((r) => r.activity_id);
@@ -96,7 +100,7 @@ export async function listInterestsForUser(userId, { limit = 50 } = {}) {
      JOIN activities a ON a.id = ai.activity_id
      JOIN activity_categories cat ON cat.id = a.category_id
      JOIN organizations o ON o.id = a.organization_id
-     WHERE ai.user_id = $1
+     WHERE ai.user_id = $1 AND a.status != 'DELETED'
      ORDER BY ai.created_at DESC
      LIMIT $2`,
     [userId, limit],

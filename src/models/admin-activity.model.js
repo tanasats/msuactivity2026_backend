@@ -118,6 +118,9 @@ export async function listAll({
   if (status) {
     params.push(status);
     where.push(`a.status = $${params.length}`);
+  } else {
+    // default: ซ่อน soft-deleted (trash view ต้องส่ง ?status=DELETED ตรงๆ)
+    where.push(`a.status != 'DELETED'`);
   }
   if (facultyId !== null) {
     params.push(facultyId);
@@ -156,7 +159,7 @@ export async function listAll({
 }
 
 // detail: full row + skills + eligible_faculties + poster + documents
-//   admin เห็นทุกฟิลด์ (รวม rejection_reason / approved_at / approved_by)
+//   admin เห็นทุกฟิลด์ (รวม rejection_reason / approved_at / approved_by + soft-delete metadata)
 export async function findById(id) {
   const { rows } = await query(
     `SELECT ${SUMMARY_COLUMNS},
@@ -168,9 +171,14 @@ export async function findById(id) {
             a.approved_at,
             a.approved_by,
             a.published_at,
-            apr.full_name AS approved_by_name
+            a.previous_status,
+            a.deleted_at,
+            a.deleted_by,
+            apr.full_name AS approved_by_name,
+            dby.full_name AS deleted_by_name
        ${FROM_JOIN}
        LEFT JOIN users apr ON apr.id = a.approved_by
+       LEFT JOIN users dby ON dby.id = a.deleted_by
       WHERE a.id = $1`,
     [id],
   );
@@ -244,6 +252,7 @@ export async function countAllByStatus(academicYear = null) {
     PENDING_APPROVAL: 0,
     WORK: 0,
     COMPLETED: 0,
+    DELETED: 0,
   };
   for (const row of rows) counts[row.status] = row.count;
   return counts;
@@ -566,6 +575,170 @@ export async function setActivityCreator(id, newCreatorId) {
   return {
     ok: true,
     activity: { ...rows[0], created_by_name: u.full_name, created_by_email: u.email },
+  };
+}
+
+// ── soft delete / restore ─────────────────────────────────────────
+// super_admin only — bypass state machine
+//   soft-delete: บันทึก status → previous_status, set status='DELETED', deleted_at/by
+//   restore:     คืน status ← previous_status, clear deleted_at/by/previous_status
+//   ใช้ transaction-per-row + FOR UPDATE — กัน race ระหว่าง 2 super_admin
+
+// คืน { ok:false, reason:'NOT_FOUND'|'ALREADY_DELETED' } | { ok:true, before, after }
+export async function softDeleteActivity(id, actorId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cur } = await client.query(
+      `SELECT id, status FROM activities WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (cur.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'NOT_FOUND' };
+    }
+    if (cur[0].status === 'DELETED') {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'ALREADY_DELETED' };
+    }
+    const previousStatus = cur[0].status;
+    const { rows } = await client.query(
+      `UPDATE activities
+          SET previous_status = $2,
+              status          = 'DELETED',
+              deleted_at      = now(),
+              deleted_by      = $3,
+              updated_at      = now()
+        WHERE id = $1
+        RETURNING id, status, previous_status, deleted_at, deleted_by`,
+      [id, previousStatus, actorId],
+    );
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      before: { status: previousStatus },
+      after: rows[0],
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// คืน { ok:false, reason:'NOT_FOUND'|'NOT_DELETED'|'NO_PREVIOUS_STATUS' } | { ok:true, before, after }
+export async function restoreActivity(id) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cur } = await client.query(
+      `SELECT id, status, previous_status FROM activities WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (cur.length === 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'NOT_FOUND' };
+    }
+    if (cur[0].status !== 'DELETED') {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'NOT_DELETED' };
+    }
+    if (!cur[0].previous_status) {
+      // edge case: row อยู่ใน DELETED แต่ไม่มี previous_status (ข้อมูลเก่า/manual edit)
+      //   → กู้คืนไม่ได้แบบ automatic — ต้องใช้ setActivityStatus override
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'NO_PREVIOUS_STATUS' };
+    }
+    const restoreTo = cur[0].previous_status;
+    const { rows } = await client.query(
+      `UPDATE activities
+          SET status          = $2::activity_status,
+              previous_status = NULL,
+              deleted_at      = NULL,
+              deleted_by      = NULL,
+              updated_at      = now()
+        WHERE id = $1
+        RETURNING id, status, updated_at`,
+      [id, restoreTo],
+    );
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      before: { status: 'DELETED', previous_status: restoreTo },
+      after: rows[0],
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// preview ก่อนลบ — admin เห็นว่าลบแล้วกระทบใคร/ชั่วโมงเท่าไหร่
+//   - affected_students: จำนวนนิสิตที่ลงทะเบียน (ไม่นับ CANCELLED_BY_USER/STAFF, REJECTED_BY_STAFF)
+//   - hours_to_lose / loan_hours_to_lose: ของนิสิตที่ evaluation_status='PASSED' (จะหายจากสถิติ)
+//   - by_status: breakdown สำหรับ admin เข้าใจองค์ประกอบ
+export async function getActivityDeleteImpact(id) {
+  // เช็คว่ามี activity จริง + ดึง hours สำหรับคำนวณ
+  const { rows: actRows } = await query(
+    `SELECT id, title, hours, loan_hours, status FROM activities WHERE id = $1`,
+    [id],
+  );
+  if (actRows.length === 0) return null;
+  const activity = actRows[0];
+
+  const { rows: countRows } = await query(
+    `SELECT status, evaluation_status, COUNT(DISTINCT user_id)::int AS cnt
+       FROM registrations
+      WHERE activity_id = $1
+      GROUP BY status, evaluation_status`,
+    [id],
+  );
+
+  const ACTIVE = new Set([
+    'PENDING_APPROVAL',
+    'REGISTERED',
+    'ATTENDED',
+    'NO_SHOW',
+  ]);
+  let affectedStudents = 0;
+  let passedCount = 0;
+  let failedCount = 0;
+  let pendingEvalCount = 0;
+  const byStatus = {};
+
+  for (const r of countRows) {
+    byStatus[r.status] = (byStatus[r.status] || 0) + r.cnt;
+    if (ACTIVE.has(r.status)) affectedStudents += r.cnt;
+    if (r.status === 'ATTENDED') {
+      if (r.evaluation_status === 'PASSED') passedCount += r.cnt;
+      else if (r.evaluation_status === 'FAILED') failedCount += r.cnt;
+      else pendingEvalCount += r.cnt;
+    }
+  }
+
+  const hoursPerStudent = Number(activity.hours) || 0;
+  const loanHoursPerStudent = Number(activity.loan_hours) || 0;
+
+  return {
+    activity: {
+      id: activity.id,
+      title: activity.title,
+      status: activity.status,
+      hours: hoursPerStudent,
+      loan_hours: loanHoursPerStudent,
+    },
+    affected_students: affectedStudents,
+    hours_to_lose: passedCount * hoursPerStudent,
+    loan_hours_to_lose: passedCount * loanHoursPerStudent,
+    by_evaluation: {
+      passed: passedCount,
+      failed: failedCount,
+      pending_evaluation: pendingEvalCount,
+    },
+    by_registration_status: byStatus,
   };
 }
 

@@ -49,6 +49,8 @@ export async function list(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
   if (activity.faculty_id !== req.user.faculty_id)
     return err(res, 403, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
 
@@ -208,6 +210,8 @@ export async function staffCheckIn(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
   if (activity.created_by !== req.user.id)
     return err(res, 403, 'จัดการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
   if (activity.status !== 'WORK' && activity.status !== 'COMPLETED')
@@ -225,8 +229,8 @@ export async function staffCheckIn(req, res) {
     ),
   ];
   if (regIds.length === 0) return err(res, 400, 'ไม่มี registration_id ที่ valid');
-  if (regIds.length > 500)
-    return err(res, 400, 'เช็คอินได้ไม่เกิน 500 รายการต่อครั้ง');
+  if (regIds.length > 250)
+    return err(res, 400, 'เช็คอินได้ไม่เกิน 250 รายการต่อครั้ง');
 
   const out = await staffCheckInBulk({
     activityId,
@@ -272,6 +276,8 @@ export async function bulkEvaluate(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
   if (activity.created_by !== req.user.id)
     return err(res, 403, 'จัดการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
 
@@ -299,8 +305,8 @@ export async function bulkEvaluate(req, res) {
     ),
   ];
   if (regIds.length === 0) return err(res, 400, 'ไม่มี registration_id ที่ valid');
-  if (regIds.length > 500)
-    return err(res, 400, 'ประเมินได้ไม่เกิน 500 รายชื่อต่อครั้ง');
+  if (regIds.length > 250)
+    return err(res, 400, 'ประเมินได้ไม่เกิน 250 รายชื่อต่อครั้ง');
 
   const out = await bulkEvaluateRegistrations({
     activityId,
@@ -341,6 +347,8 @@ export async function bulkAdd(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
   if (activity.created_by !== req.user.id)
     return err(res, 403, 'จัดการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
 
@@ -356,8 +364,8 @@ export async function bulkAdd(req, res) {
   ];
   if (msuIds.length === 0)
     return err(res, 400, 'ไม่มีรหัสนิสิตให้เพิ่ม');
-  if (msuIds.length > 200)
-    return err(res, 400, 'เพิ่มได้ไม่เกิน 200 รายชื่อต่อครั้ง');
+  if (msuIds.length > 250)
+    return err(res, 400, 'เพิ่มได้ไม่เกิน 250 รายชื่อต่อครั้ง');
 
   const result = await bulkAddByMsuIds(activityId, msuIds, req.user.id);
   if (result.added?.length > 0) {
@@ -398,6 +406,8 @@ export async function bulkParticipantRole(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
   if (activity.created_by !== req.user.id)
     return err(res, 403, 'จัดการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
 
@@ -418,8 +428,8 @@ export async function bulkParticipantRole(req, res) {
     ),
   ];
   if (regIds.length === 0) return err(res, 400, 'ไม่มี registration_id ที่ valid');
-  if (regIds.length > 500)
-    return err(res, 400, 'เปลี่ยนสถานภาพได้ไม่เกิน 500 รายชื่อต่อครั้ง');
+  if (regIds.length > 250)
+    return err(res, 400, 'เปลี่ยนสถานภาพได้ไม่เกิน 250 รายชื่อต่อครั้ง');
 
   const out = await bulkUpdateParticipantRole({
     activityId,
@@ -466,6 +476,8 @@ export async function exportRegistrationsXlsx(req, res) {
 
   const activity = await findActivity(activityId);
   if (!activity) return err(res, 404, 'activity not found');
+  if (activity.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว');
   if (activity.created_by !== req.user.id)
     return err(res, 403, 'ส่งออกได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
 

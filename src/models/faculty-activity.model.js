@@ -57,7 +57,8 @@ export async function listByFaculty({
   search = null,
   limit = 50,
 } = {}) {
-  const where = ['a.faculty_id = $1'];
+  // ไม่ list กิจกรรมที่ super_admin ลบไป (faculty ไม่มีสิทธิ์ดู/restore)
+  const where = ['a.faculty_id = $1', `a.status != 'DELETED'`];
   const params = [facultyId];
 
   if (status) {
@@ -184,7 +185,11 @@ export async function countByStatus(facultyId, academicYear = null) {
     WORK: 0,
     COMPLETED: 0,
   };
-  for (const row of rows) counts[row.status] = row.count;
+  // faculty ไม่เห็น DELETED (super_admin ลบ) — ไม่นับเข้า count
+  for (const row of rows) {
+    if (row.status === 'DELETED') continue;
+    counts[row.status] = row.count;
+  }
   return counts;
 }
 
@@ -209,7 +214,11 @@ export async function countMineByStatus(requesterId, academicYear = null) {
     WORK: 0,
     COMPLETED: 0,
   };
-  for (const row of rows) counts[row.status] = row.count;
+  // faculty ไม่เห็น DELETED (super_admin ลบ) — ไม่นับเข้า count
+  for (const row of rows) {
+    if (row.status === 'DELETED') continue;
+    counts[row.status] = row.count;
+  }
   return counts;
 }
 
@@ -220,6 +229,7 @@ export async function listAcademicYearsByFaculty(facultyId) {
     `SELECT DISTINCT academic_year
        FROM activities
       WHERE faculty_id = $1
+        AND status != 'DELETED'
       ORDER BY academic_year DESC`,
     [facultyId],
   );

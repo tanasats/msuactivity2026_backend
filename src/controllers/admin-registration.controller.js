@@ -28,7 +28,9 @@ import {
 // audit: ทุก action บันทึกใน activity_audit_logs
 
 const EVALUATION_RESULTS = new Set(['PASSED', 'FAILED']);
-const MAX_BULK = 500;
+// super_admin endpoint — ทำ bulk ได้มากกว่า faculty (faculty cap 200/500 ตาม op)
+//   ครอบคลุม bulk-add / approve / evaluate / check-in / participant-role
+const MAX_BULK = 1000;
 
 function err(res, status, message) {
   return res.status(status).json({ status: 'error', message });
@@ -61,6 +63,11 @@ async function loadActivity(req, res) {
     err(res, 404, 'activity not found');
     return null;
   }
+  // block ทุกการเขียนเมื่อกิจกรรมถูก soft-delete (super_admin ต้อง restore ก่อน)
+  if (a.status === 'DELETED') {
+    err(res, 409, 'กิจกรรมถูกลบแล้ว — โปรดกู้คืนก่อนดำเนินการ');
+    return null;
+  }
   return a;
 }
 
@@ -70,7 +77,7 @@ export async function bulkAdd(req, res) {
   const activity = await loadActivity(req, res);
   if (!activity) return;
 
-  const parsed = parseMsuIds(req.body?.msu_ids, 200);
+  const parsed = parseMsuIds(req.body?.msu_ids);
   if (parsed.error) return err(res, 400, parsed.error);
 
   const result = await bulkAddByMsuIds(

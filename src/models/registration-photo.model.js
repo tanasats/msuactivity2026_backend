@@ -10,7 +10,8 @@ export async function findRegistrationContext(registrationId) {
             r.activity_id,
             r.status          AS registration_status,
             r.evaluation_status,
-            a.faculty_id      AS activity_faculty_id
+            a.faculty_id      AS activity_faculty_id,
+            a.status          AS activity_status
        FROM registrations r
        JOIN activities a ON a.id = r.activity_id
       WHERE r.id = $1`,

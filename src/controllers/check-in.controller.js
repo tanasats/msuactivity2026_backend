@@ -61,6 +61,12 @@ export async function scan(req, res) {
     });
   }
 
+  if (reg.activity_status === 'DELETED') {
+    return ok(res, 409, {
+      status: 'error',
+      message: 'กิจกรรมถูกลบแล้ว',
+    });
+  }
   if (reg.activity_status !== 'WORK' && reg.activity_status !== 'COMPLETED') {
     return ok(res, 409, {
       status: 'error',

@@ -15,6 +15,9 @@ const ALLOWED_STATUSES = new Set([
   'WORK',
   'COMPLETED',
 ]);
+// LIST_STATUSES = สถานะที่ list endpoint ยอมรับใน ?status= filter
+//   รวม DELETED เพื่อรองรับ trash view (?status=DELETED)
+const LIST_STATUSES = new Set([...ALLOWED_STATUSES, 'DELETED']);
 const ALLOWED_SORTS = new Set([
   'updated_desc',
   'updated_asc',
@@ -81,9 +84,10 @@ export async function academicYears(req, res) {
 }
 
 // GET /api/admin/activities?status=&faculty_id=&academic_year=&search=&limit=&offset=
+//   default: ซ่อน DELETED (เฉพาะ trash view ส่ง ?status=DELETED ถึงจะเห็น)
 export async function list(req, res) {
   const status = req.query.status || null;
-  if (status && !ALLOWED_STATUSES.has(status))
+  if (status && !LIST_STATUSES.has(status))
     return err(res, 400, 'invalid status');
 
   const facultyId = parsePosInt(req.query.faculty_id);
@@ -262,6 +266,9 @@ export async function setStatus(req, res) {
   // เก็บ before-state ก่อน update เพื่อ audit
   const before = await activities.findById(id);
   if (!before) return err(res, 404, 'activity not found');
+  // กิจกรรมที่ถูกลบต้อง restore ก่อน (จะได้กลับ previous_status ที่บันทึกไว้)
+  if (before.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว — โปรดใช้ "กู้คืน" แทน');
 
   const result = await activities.setActivityStatus(id, status, req.user.id);
   if (!result) return err(res, 404, 'activity not found');
@@ -301,6 +308,8 @@ export async function setCreator(req, res) {
 
   // เก็บ before-state ก่อน update เพื่อ audit
   const before = await activities.findById(id);
+  if (before && before.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว — โปรดกู้คืนก่อนเปลี่ยนผู้สร้าง');
   const result = await activities.setActivityCreator(id, newCreatorId);
   if (result === null) return err(res, 404, 'activity not found');
   if (!result.ok) {
@@ -396,6 +405,8 @@ export async function adminEdit(req, res) {
 
   const before = await activities.findById(id);
   if (!before) return err(res, 404, 'activity not found');
+  if (before.status === 'DELETED')
+    return err(res, 409, 'กิจกรรมถูกลบแล้ว — โปรดกู้คืนก่อนแก้ไข');
 
   // เก็บเฉพาะ field ที่ส่งมา + ผ่าน validator
   const payload = {};
@@ -473,6 +484,89 @@ export async function adminEdit(req, res) {
   }
 
   res.json({ status: 'ok', activity: updated, changed_fields: changedFields });
+}
+
+// ── soft delete / restore (super_admin only — gate ที่ route) ─────
+
+// GET /api/admin/activities/:id/delete-impact
+//   preview ก่อน confirm ลบ — แสดงผลกระทบ (จำนวนนิสิต + ชั่วโมงที่จะหาย)
+export async function deleteImpact(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+  const impact = await activities.getActivityDeleteImpact(id);
+  if (!impact) return err(res, 404, 'activity not found');
+  res.json(impact);
+}
+
+// POST /api/admin/activities/:id/soft-delete
+//   body: { reason?: string }
+//   soft-delete: status → 'DELETED' + เก็บ previous_status + บันทึก audit
+export async function softDelete(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const reasonRaw = req.body?.reason;
+  const reason =
+    typeof reasonRaw === 'string' && reasonRaw.trim().length > 0
+      ? reasonRaw.trim().slice(0, 1000)
+      : null;
+
+  const result = await activities.softDeleteActivity(id, req.user.id);
+  if (!result.ok) {
+    if (result.reason === 'NOT_FOUND') return err(res, 404, 'activity not found');
+    if (result.reason === 'ALREADY_DELETED')
+      return err(res, 409, 'กิจกรรมนี้ถูกลบไปแล้ว');
+    return err(res, 400, 'ลบไม่สำเร็จ');
+  }
+
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.DELETE,
+    before: result.before,
+    after: {
+      status: 'DELETED',
+      previous_status: result.after.previous_status,
+      deleted_at: result.after.deleted_at,
+      reason,
+    },
+    note: reason,
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', activity: result.after });
+}
+
+// POST /api/admin/activities/:id/restore
+//   restore: status ← previous_status + clear deleted_at/by + บันทึก audit
+export async function restore(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return err(res, 400, 'invalid id');
+
+  const result = await activities.restoreActivity(id);
+  if (!result.ok) {
+    if (result.reason === 'NOT_FOUND') return err(res, 404, 'activity not found');
+    if (result.reason === 'NOT_DELETED')
+      return err(res, 409, 'กิจกรรมนี้ไม่ได้อยู่ในสถานะถูกลบ');
+    if (result.reason === 'NO_PREVIOUS_STATUS')
+      return err(
+        res,
+        409,
+        'ไม่ทราบสถานะก่อนลบ — โปรดใช้ "เปลี่ยนสถานะ" (override) แทน',
+      );
+    return err(res, 400, 'กู้คืนไม่สำเร็จ');
+  }
+
+  await createActivityAuditLog({
+    actor_id: req.user.id,
+    activity_id: id,
+    action: AUDIT.RESTORE,
+    before: result.before,
+    after: { status: result.after.status },
+    ...auditMetaFromReq(req),
+  });
+
+  res.json({ status: 'ok', activity: result.after });
 }
 
 // POST /api/admin/activities/:id/reject
