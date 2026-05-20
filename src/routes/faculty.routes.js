@@ -40,22 +40,30 @@ import {
   staffCheckIn as staffCheckInRegistrations,
 } from '../controllers/faculty-registration.controller.js';
 
+// multer 2.x default ใช้ latin1 decode multipart filename + form fields
+//   → ชื่อไฟล์ภาษาไทย (UTF-8 bytes) จะกลายเป็น mojibake "à¹€à¸­à¸..."
+//   ต้อง override เป็น utf8 ให้ตรงกับสิ่งที่เบราว์เซอร์ส่งจริง
+const MULTER_UTF8 = { defParamCharset: 'utf8' };
+
 // multer in-memory — ขนาดไฟล์เพดาน 6 MB (poster spec 5 MB) เพื่อเผื่อ overhead
 const posterUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 6 * 1024 * 1024 },
+  ...MULTER_UTF8,
 });
 
 // document spec 20 MB + เผื่อ overhead เป็น 22 MB
 const documentUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 22 * 1024 * 1024 },
+  ...MULTER_UTF8,
 });
 
 // gallery (รูปประกอบ) spec 5 MB + เผื่อ overhead เป็น 6 MB
 const galleryUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 6 * 1024 * 1024 },
+  ...MULTER_UTF8,
 });
 
 // endpoints สำหรับ faculty_staff (admin/super_admin เข้าได้ด้วย — ใช้ดูข้ามคณะภายหลัง)

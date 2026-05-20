@@ -24,9 +24,11 @@ import {
 } from '../controllers/student-interest.controller.js';
 
 // multer in-memory — เพดานเผื่อ overhead 6 MB (spec รูป 5 MB)
+//   defParamCharset: 'utf8' — กัน mojibake ของชื่อไฟล์ภาษาไทย (multer 2.x default = latin1)
 const photoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 6 * 1024 * 1024 },
+  defParamCharset: 'utf8',
 });
 
 // endpoints สำหรับ role student เท่านั้น

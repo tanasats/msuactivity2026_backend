@@ -1,6 +1,5 @@
 import {
   findActiveRegistrationByToken,
-  getCheckInWindowDefaults,
   recordCheckIn,
 } from '../models/check-in.model.js';
 import {
@@ -88,20 +87,11 @@ export async function scan(req, res) {
   }
 
   // ── window check ──
+  //   activities.check_in_opens_at / closes_at เป็น NOT NULL (snapshot ฝัง row)
+  //   → ใช้ค่าตรงๆ ไม่มี fallback runtime
   const now = new Date();
-  let windowOpens, windowCloses;
-  if (reg.check_in_opens_at && reg.check_in_closes_at) {
-    windowOpens = new Date(reg.check_in_opens_at);
-    windowCloses = new Date(reg.check_in_closes_at);
-  } else {
-    const { beforeMinutes, afterMinutes } = await getCheckInWindowDefaults();
-    windowOpens = new Date(
-      new Date(reg.start_at).getTime() - beforeMinutes * 60 * 1000,
-    );
-    windowCloses = new Date(
-      new Date(reg.end_at).getTime() + afterMinutes * 60 * 1000,
-    );
-  }
+  const windowOpens = new Date(reg.check_in_opens_at);
+  const windowCloses = new Date(reg.check_in_closes_at);
   if (now < windowOpens) {
     return ok(res, 409, {
       status: 'error',

@@ -378,21 +378,13 @@ const ADMIN_EDIT_VALIDATORS = {
   end_at: (v) => parseDateLike(v, 'end_at'),
   registration_open_at: (v) => parseDateLike(v, 'registration_open_at'),
   registration_close_at: (v) => parseDateLike(v, 'registration_close_at'),
-  // check-in window: nullable — ส่ง null/'' = clear (กลับไปใช้ default ใน system_settings)
-  check_in_opens_at: (v) => parseNullableDateLike(v, 'check_in_opens_at'),
-  check_in_closes_at: (v) => parseNullableDateLike(v, 'check_in_closes_at'),
+  // check-in window: NOT NULL (snapshot ฝัง row) — บังคับให้มีค่า
+  check_in_opens_at: (v) => parseDateLike(v, 'check_in_opens_at'),
+  check_in_closes_at: (v) => parseDateLike(v, 'check_in_closes_at'),
 };
 
 function parseDateLike(v, label) {
   if (v === null || v === undefined) return { ok: false, message: `${label} ต้องมีค่า` };
-  const d = new Date(v);
-  return Number.isNaN(d.getTime())
-    ? { ok: false, message: `${label} ไม่ใช่วันที่ที่ถูกต้อง` }
-    : { ok: true, value: d.toISOString() };
-}
-
-function parseNullableDateLike(v, label) {
-  if (v === null || v === '' || v === undefined) return { ok: true, value: null };
   const d = new Date(v);
   return Number.isNaN(d.getTime())
     ? { ok: false, message: `${label} ไม่ใช่วันที่ที่ถูกต้อง` }
@@ -431,8 +423,7 @@ export async function adminEdit(req, res) {
   if (new Date(finalRegOpen) >= new Date(finalRegClose))
     return err(res, 400, 'registration_open_at ต้องน้อยกว่า registration_close_at');
 
-  // check-in window: ตรวจ open < close ถ้าทั้งคู่ไม่ null
-  //   (ถ้าฝั่งใดเป็น null ในผลลัพธ์ → ใช้ default ของระบบ ไม่ต้องตรวจ)
+  // check-in window: NOT NULL ทั้งคู่ — ตรวจ open < close เสมอ
   const finalCiOpen =
     payload.check_in_opens_at !== undefined
       ? payload.check_in_opens_at
@@ -441,11 +432,7 @@ export async function adminEdit(req, res) {
     payload.check_in_closes_at !== undefined
       ? payload.check_in_closes_at
       : before.check_in_closes_at;
-  if (
-    finalCiOpen &&
-    finalCiClose &&
-    new Date(finalCiOpen) >= new Date(finalCiClose)
-  ) {
+  if (new Date(finalCiOpen) >= new Date(finalCiClose)) {
     return err(
       res,
       400,

@@ -1,4 +1,5 @@
 import * as settings from '../models/system-setting.model.js';
+import { getCheckInWindowDefaults } from '../models/check-in.model.js';
 import {
   createMasterDataAuditLog,
   MASTER_AUDIT_TARGETS,
@@ -39,6 +40,17 @@ function validateValue(schema, value) {
     return { ok: true, value: n };
   }
   return { ok: false, message: 'ไม่รองรับ type นี้' };
+}
+
+// GET /api/public/check-in-defaults
+//   public (ไม่ต้อง auth) — frontend activity form อ่านมา auto-fill ช่วงเปิดเช็คอิน
+//   เปิด public ได้เพราะเป็น "config ทั่วไป" ไม่กระทบ privacy
+export async function checkInDefaults(_req, res) {
+  const { beforeMinutes, afterMinutes } = await getCheckInWindowDefaults();
+  res.json({
+    before_minutes: beforeMinutes,
+    after_minutes: afterMinutes,
+  });
 }
 
 // GET /api/admin/settings

@@ -349,13 +349,11 @@ function validatePayload(body, { requirePoster = false } = {}) {
   )
     errs.push('"คณะที่รับสมัคร" มีค่าไม่ถูกต้อง');
 
-  // window check-in (optional — fallback ใช้ start_at - 30m / end_at + 15m)
-  const ciOpens = body.check_in_opens_at == null ? null : parseDate(body.check_in_opens_at);
-  const ciCloses = body.check_in_closes_at == null ? null : parseDate(body.check_in_closes_at);
-  if (body.check_in_opens_at != null && !ciOpens)
-    errs.push('"ช่วงเปิดเช็คอิน — เริ่ม" ไม่ถูกต้อง');
-  if (body.check_in_closes_at != null && !ciCloses)
-    errs.push('"ช่วงเปิดเช็คอิน — สิ้นสุด" ไม่ถูกต้อง');
+  // window check-in (required — DB คอลัมน์ NOT NULL ทั้งคู่)
+  const ciOpens = parseDate(body.check_in_opens_at);
+  const ciCloses = parseDate(body.check_in_closes_at);
+  if (!ciOpens) errs.push('"ช่วงเปิดเช็คอิน — เริ่ม" จำเป็นต้องระบุ');
+  if (!ciCloses) errs.push('"ช่วงเปิดเช็คอิน — สิ้นสุด" จำเป็นต้องระบุ');
   if (ciOpens && ciCloses && ciOpens >= ciCloses)
     errs.push('"ช่วงเช็คอินเริ่ม" ต้องน้อยกว่า "ช่วงเช็คอินสิ้นสุด"');
 
@@ -381,8 +379,8 @@ function normalizePayload(body) {
     registration_open_at: body.registration_open_at,
     registration_close_at: body.registration_close_at,
     approval_mode: body.approval_mode,
-    check_in_opens_at: body.check_in_opens_at ?? null,
-    check_in_closes_at: body.check_in_closes_at ?? null,
+    check_in_opens_at: body.check_in_opens_at,
+    check_in_closes_at: body.check_in_closes_at,
     budget_source: body.budget_source.trim(),
     budget_requested: parseMoney(body.budget_requested),
     budget_actual: parseMoney(body.budget_actual),
