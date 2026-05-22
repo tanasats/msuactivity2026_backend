@@ -37,14 +37,19 @@ export async function createUser({
   return rows[0];
 }
 
+// sync ข้อมูล Google profile หลัง login สำเร็จ
+//   full_name:   sync ทุกครั้ง (ถ้าผู้ใช้เปลี่ยนชื่อใน Google → ตามไป)
+//   google_sub:  backfill เฉพาะตอน DB เป็น NULL (เป็น permanent ID ไม่ควรเปลี่ยน)
+//   picture_url: backfill เฉพาะตอน DB เป็น NULL (preserve ค่าเดิม ถ้ามี)
+// → COALESCE(column, $N) = "ใช้ค่า DB ถ้าไม่ใช่ NULL, ไม่งั้นใช้ค่าใหม่"
 export async function updateGoogleProfile(id, { full_name, google_sub, picture_url }) {
   await query(
     `UPDATE users SET
        full_name   = COALESCE($2, full_name),
-       google_sub  = COALESCE($3, google_sub),
-       picture_url = COALESCE($4, picture_url)
+       google_sub  = COALESCE(google_sub, $3),
+       picture_url = COALESCE(picture_url, $4)
      WHERE id = $1`,
-    [id, full_name,google_sub, picture_url],
+    [id, full_name, google_sub, picture_url],
   );
 }
 

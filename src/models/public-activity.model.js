@@ -93,13 +93,14 @@ export async function searchPublicActivities(q, limit = 20) {
   return rows;
 }
 
-// detail: เฉพาะ WORK — รวม description + skills + eligible_faculties
+// detail: WORK + COMPLETED — ให้ public ดูข้อมูลกิจกรรมที่จบไปแล้วได้
+//   (DELETED ตัดออกอัตโนมัติเพราะไม่อยู่ใน whitelist)
 export async function getPublicActivityDetail(id) {
   const { rows } = await query(
     `SELECT ${SUMMARY_COLUMNS},
             a.description
        ${FROM_JOIN}
-      WHERE a.id = $1 AND a.status = 'WORK'`,
+      WHERE a.id = $1 AND a.status IN ('WORK','COMPLETED')`,
     [id],
   );
   const activity = rows[0];
