@@ -48,6 +48,17 @@ import {
   bulkParticipantRole as bulkParticipantRoleRegistration,
 } from '../controllers/admin-registration.controller.js';
 import { list as listMasterDataAudit } from '../controllers/master-data-audit.controller.js';
+import {
+  approve as approveCertificate,
+  detail as certificateDetail,
+  issue as issueCertificate,
+  list as listCertificates,
+  reject as rejectCertificate,
+} from '../controllers/admin-certificate.controller.js';
+import {
+  create as createCertRule,
+  get as getCertRules,
+} from '../controllers/cert-requirement.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -185,5 +196,21 @@ router.post('/announcements', asyncHandler(createAnnouncement));
 router.get('/announcements/:id', asyncHandler(getAnnouncement));
 router.patch('/announcements/:id', asyncHandler(updateAnnouncement));
 router.delete('/announcements/:id', asyncHandler(removeAnnouncement));
+
+// certificate (transcript กิจกรรม)
+//   queue + lifecycle actions — admin + super_admin
+//   rule editor — super_admin only
+router.get('/certificates', asyncHandler(listCertificates));
+router.get('/certificates/:id', asyncHandler(certificateDetail));
+router.post('/certificates/:id/approve', asyncHandler(approveCertificate));
+router.post('/certificates/:id/reject', asyncHandler(rejectCertificate));
+router.post('/certificates/:id/issue', asyncHandler(issueCertificate));
+// rule history — admin/super_admin อ่านได้; แก้ rule = super_admin only
+router.get('/cert-requirements', asyncHandler(getCertRules));
+router.post(
+  '/cert-requirements',
+  requireRole('super_admin'),
+  asyncHandler(createCertRule),
+);
 
 export default router;

@@ -12,6 +12,7 @@ export const MASTER_AUDIT_TARGETS = Object.freeze({
   FACULTY: 'faculty',
   SYSTEM_SETTING: 'system_setting',
   ANNOUNCEMENT: 'announcement',
+  CERT_REQUIREMENT: 'cert_requirement',  // กฎเกณฑ์การออก transcript (Phase 1)
 });
 
 export const MASTER_AUDIT_ACTIONS = Object.freeze({

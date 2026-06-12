@@ -22,6 +22,12 @@ import {
   add as addInterest,
   remove as removeInterestCtrl,
 } from '../controllers/student-interest.controller.js';
+import {
+  eligibility as certEligibility,
+  requestCertificate,
+  listMine as listMyCerts,
+  detailMine as certDetail,
+} from '../controllers/student-certificate.controller.js';
 
 // multer in-memory — เพดานเผื่อ overhead 6 MB (spec รูป 5 MB)
 //   defParamCharset: 'utf8' — กัน mojibake ของชื่อไฟล์ภาษาไทย (multer 2.x default = latin1)
@@ -66,5 +72,12 @@ router.get('/interests', asyncHandler(listInterests));
 router.get('/interests/ids', asyncHandler(listInterestIds));
 router.post('/interests/:activityId', asyncHandler(addInterest));
 router.delete('/interests/:activityId', asyncHandler(removeInterestCtrl));
+
+// certificate (transcript กิจกรรม)
+//   eligibility ต้องอยู่ก่อน /:id ไม่งั้น Express จะแปล "eligibility" → :id
+router.get('/certificates/eligibility', asyncHandler(certEligibility));
+router.get('/certificates', asyncHandler(listMyCerts));
+router.get('/certificates/:id', asyncHandler(certDetail));
+router.post('/certificates/request', asyncHandler(requestCertificate));
 
 export default router;
