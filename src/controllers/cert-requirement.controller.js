@@ -72,6 +72,26 @@ export async function get(req, res) {
   res.json({ active, history });
 }
 
+// GET /api/public/cert-requirement
+//   public — ใช้บน landing page แสดงเกณฑ์การขอ transcript ให้นิสิตเห็น
+//   คืนเฉพาะฟิลด์ที่ผู้ใช้ทั่วไปต้องเห็น (ไม่รวม created_by, internal id)
+export async function getPublicActive(_req, res) {
+  const rule = await getActiveRule();
+  if (!rule) {
+    return res
+      .status(404)
+      .json({ status: 'error', message: 'ยังไม่ได้กำหนดเกณฑ์การออก transcript' });
+  }
+  res.json({
+    group_a_prefixes: rule.group_a_prefixes,
+    group_b_prefixes: rule.group_b_prefixes,
+    group_a_min_activities: rule.group_a_min_activities,
+    group_b_min_activities: rule.group_b_min_activities,
+    min_total_hours: rule.min_total_hours,
+    effective_from: rule.effective_from,
+  });
+}
+
 // POST /api/admin/cert-requirements
 //   super_admin only (gate ที่ route)
 //   set old.effective_to + INSERT new + audit

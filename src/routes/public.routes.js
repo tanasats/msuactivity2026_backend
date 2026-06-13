@@ -9,6 +9,7 @@ import {
 } from '../controllers/public-activity.controller.js';
 import { listPublic as listAnnouncements } from '../controllers/announcement.controller.js';
 import { checkInDefaults } from '../controllers/system-setting.controller.js';
+import { getPublicActive as getPublicCertRule } from '../controllers/cert-requirement.controller.js';
 
 // endpoint สำหรับ landing page — ไม่ต้อง auth
 const router = Router();
@@ -23,5 +24,7 @@ router.post('/activities/:id/view', asyncHandler(recordActivityView));
 router.get('/announcements', asyncHandler(listAnnouncements));
 // config: ค่า default ช่วงเปิด-ปิดเช็คอิน (frontend activity form ใช้ auto-fill)
 router.get('/check-in-defaults', asyncHandler(checkInDefaults));
+// เกณฑ์การขอ transcript กิจกรรม (landing page โชว์เพื่อกระตุ้นนิสิต)
+router.get('/cert-requirement', asyncHandler(getPublicCertRule));
 
 export default router;
