@@ -56,6 +56,12 @@ import {
   reject as rejectCertificate,
 } from '../controllers/admin-certificate.controller.js';
 import {
+  listEligible as listEligibleStudents,
+  transcriptData,
+  patchAcademicProfile,
+  transcriptDocx,
+} from '../controllers/admin-transcript.controller.js';
+import {
   create as createCertRule,
   get as getCertRules,
 } from '../controllers/cert-requirement.controller.js';
@@ -124,7 +130,16 @@ router.put(
 //   - /registrations    : cross-browse registrations ข้ามนิสิต+กิจกรรม
 //   - /registrations.csv: export ผลตาม filter
 router.get('/students', asyncHandler(listStudents));
+// ทรานสคริปต์กิจกรรม — ต้องมาก่อน /students/:id (กัน 'eligible' ถูกจับเป็น :id)
+//   - /students/eligible                : รายชื่อนิสิตที่เข้าร่วมครบตามเกณฑ์
+//   - /students/:id/transcript          : JSON ทรานสคริปต์ (preview)
+//   - /students/:id/academic-profile    : PATCH สาขา/ปริญญา/วันรับเข้า/ชื่ออังกฤษ
+//   - /students/:id/transcript.docx     : POST ดาวน์โหลด Word (รับ override จากฟอร์ม)
+router.get('/students/eligible', asyncHandler(listEligibleStudents));
 router.get('/students/:id', asyncHandler(studentDetail));
+router.get('/students/:id/transcript', asyncHandler(transcriptData));
+router.patch('/students/:id/academic-profile', asyncHandler(patchAcademicProfile));
+router.post('/students/:id/transcript.docx', asyncHandler(transcriptDocx));
 router.get('/students/:id/registrations.csv', asyncHandler(studentRegistrationsCsv));
 router.get('/registrations', asyncHandler(listRegistrations));
 router.get('/registrations.csv', asyncHandler(registrationsCsv));
