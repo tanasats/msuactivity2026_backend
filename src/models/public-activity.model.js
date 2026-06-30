@@ -25,7 +25,19 @@ const SUMMARY_COLUMNS = `
   o.name AS organization_name,
   a.view_count,
   a.interested_count,
-  poster.storage_key AS poster_storage_key
+  poster.storage_key AS poster_storage_key,
+  -- คณะที่เปิดรับ — [] = เปิดทุกคณะ (ดู memory: project_eligibility)
+  --   ใช้บนการ์ด landing เพื่อบอก "ทุกคณะ / บางคณะ / เฉพาะคณะ"
+  COALESCE(
+    (SELECT json_agg(
+              json_build_object('id', f.id, 'code', f.code, 'name', f.name)
+              ORDER BY f.code
+            )
+       FROM activity_eligible_faculties ef
+       JOIN faculties f ON f.id = ef.faculty_id
+      WHERE ef.activity_id = a.id),
+    '[]'
+  ) AS eligible_faculties
 `;
 
 const FROM_JOIN = `
@@ -106,7 +118,7 @@ export async function getPublicActivityDetail(id) {
   const activity = rows[0];
   if (!activity) return null;
 
-  const [skillsRes, facultiesRes, posterRes, docsRes] = await Promise.all([
+  const [skillsRes, posterRes, docsRes] = await Promise.all([
     query(
       `SELECT s.id, s.code, s.name,
               s.parent_id,
@@ -116,14 +128,6 @@ export async function getPublicActivityDetail(id) {
          LEFT JOIN skills p ON p.id = s.parent_id
         WHERE aks.activity_id = $1
         ORDER BY COALESCE(p.code, s.code), s.code`,
-      [id],
-    ),
-    query(
-      `SELECT f.id, f.code, f.name
-         FROM activity_eligible_faculties ef
-         JOIN faculties f ON f.id = ef.faculty_id
-        WHERE ef.activity_id = $1
-        ORDER BY f.code`,
       [id],
     ),
     query(
@@ -144,9 +148,8 @@ export async function getPublicActivityDetail(id) {
   ]);
 
   return {
-    ...activity,
+    ...activity, // eligible_faculties มากับ SUMMARY_COLUMNS แล้ว ([] = เปิดรับทุกคณะ)
     skills: skillsRes.rows,
-    eligible_faculties: facultiesRes.rows, // [] = เปิดรับทุกคณะ (ดู memory: project_eligibility)
     poster: posterRes.rows[0] || null,
     documents: docsRes.rows,
   };
