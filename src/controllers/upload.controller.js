@@ -44,7 +44,13 @@ export async function uploadPoster(req, res) {
   const key = `posters/${crypto.randomUUID()}.${ext}`;
 
   try {
-    await putObject({ key, body: buffer, contentType: detected.mime });
+    // key เป็น UUID (content-addressed) → immutable ยาว ๆ ได้ปลอดภัย → browser cache รูปเต็มบนหน้า detail
+    await putObject({
+      key,
+      body: buffer,
+      contentType: detected.mime,
+      cacheControl: 'public, max-age=604800, immutable',
+    });
   } catch (err) {
     console.error('[upload poster] s3 put failed', err);
     return res.status(502).json({

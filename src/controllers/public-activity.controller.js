@@ -5,6 +5,15 @@ import {
 } from '../models/public-activity.model.js';
 import { incrementViewCount } from '../models/activity-interest.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
+import { getPosterThumbKey } from '../utils/poster-thumb.js';
+
+// การ์ด landing/ผลค้นหาแสดงรูปเล็ก → ใช้ thumbnail (webp ~640px) แทนไฟล์เต็ม
+//   presign บน thumb key; ถ้าไม่มี poster → null
+async function posterThumbUrl(posterStorageKey) {
+  if (!posterStorageKey) return null;
+  const thumbKey = await getPosterThumbKey(posterStorageKey);
+  return getPresignedGetUrl(thumbKey);
+}
 
 const ALLOWED_FILTERS = new Set(['open', 'upcoming']);
 const MAX_LIMIT = 50;
@@ -24,9 +33,7 @@ export async function list(req, res) {
       const { poster_storage_key, ...rest } = a;
       return {
         ...rest,
-        poster_url: poster_storage_key
-          ? await getPresignedGetUrl(poster_storage_key)
-          : null,
+        poster_url: await posterThumbUrl(poster_storage_key),
       };
     }),
   );
@@ -52,9 +59,7 @@ export async function search(req, res) {
       const { poster_storage_key, ...rest } = a;
       return {
         ...rest,
-        poster_url: poster_storage_key
-          ? await getPresignedGetUrl(poster_storage_key)
-          : null,
+        poster_url: await posterThumbUrl(poster_storage_key),
       };
     }),
   );
