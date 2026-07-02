@@ -58,7 +58,10 @@ export async function listPublicActivities({ filter = null, limit = 12, offset =
   if (filter === 'open') {
     where.push('now() BETWEEN a.registration_open_at AND a.registration_close_at');
   } else if (filter === 'upcoming') {
+    // "กำลังจะเปิดรับสมัคร" = ยังไม่เริ่มจัด และ "ยังไม่อยู่ในช่วงรับสมัคร"
+    //   ★ ตัดกิจกรรมที่อยู่ในช่วงรับสมัครออก → ไปอยู่ใน open เท่านั้น (ไม่ทับซ้อนกับ open)
     where.push('a.start_at > now()');
+    where.push('now() NOT BETWEEN a.registration_open_at AND a.registration_close_at');
   }
   const whereSql = where.join(' AND ');
 
