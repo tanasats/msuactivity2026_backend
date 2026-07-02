@@ -59,11 +59,9 @@ export async function listPublicActivities({ filter = null, limit = 12 } = {}) {
     where.push('a.start_at > now()');
   }
 
-  // เรียงให้กิจกรรมที่ใกล้เริ่มก่อน + ปิดรับสมัครใกล้กว่ามาก่อน
-  const orderBy =
-    filter === 'open'
-      ? 'a.registration_close_at ASC'
-      : 'a.start_at ASC';
+  // เรียงตามวันจัดกิจกรรม — วันที่ใกล้กว่าแสดงก่อน (ทั้ง open และ upcoming)
+  //   tie-break ด้วย id เพื่อลำดับคงที่เมื่อ start_at เท่ากัน
+  const orderBy = 'a.start_at ASC, a.id ASC';
 
   const { rows } = await query(
     `SELECT ${SUMMARY_COLUMNS}
