@@ -51,27 +51,36 @@ const FROM_JOIN = `
 // list (filter: 'open' | 'upcoming' | null=all WORK)
 //   open     = status WORK + อยู่ใน registration window
 //   upcoming = status WORK + start_at > now()
-export async function listPublicActivities({ filter = null, limit = 12 } = {}) {
+//   คืน { items, total } — total = จำนวนทั้งหมดที่ตรง filter (ไม่จำกัด limit)
+//   รองรับ offset เพื่อแบ่งหน้า/โหลดเพิ่ม (หน้า /activities)
+export async function listPublicActivities({ filter = null, limit = 12, offset = 0 } = {}) {
   const where = ["a.status = 'WORK'"];
   if (filter === 'open') {
     where.push('now() BETWEEN a.registration_open_at AND a.registration_close_at');
   } else if (filter === 'upcoming') {
     where.push('a.start_at > now()');
   }
+  const whereSql = where.join(' AND ');
 
-  // เรียงตามวันจัดกิจกรรม — วันที่ใกล้กว่าแสดงก่อน (ทั้ง open และ upcoming)
-  //   tie-break ด้วย id เพื่อลำดับคงที่เมื่อ start_at เท่ากัน
-  const orderBy = 'a.start_at ASC, a.id ASC';
+  // เรียงให้กิจกรรมที่ใกล้เริ่มก่อน + ปิดรับสมัครใกล้กว่ามาก่อน
+  const orderBy =
+    filter === 'open'
+      ? 'a.registration_close_at ASC'
+      : 'a.start_at ASC';
 
-  const { rows } = await query(
-    `SELECT ${SUMMARY_COLUMNS}
-       ${FROM_JOIN}
-      WHERE ${where.join(' AND ')}
-      ORDER BY ${orderBy}
-      LIMIT $1`,
-    [limit],
-  );
-  return rows;
+  const [listRes, countRes] = await Promise.all([
+    query(
+      `SELECT ${SUMMARY_COLUMNS}
+         ${FROM_JOIN}
+        WHERE ${whereSql}
+        ORDER BY ${orderBy}
+        LIMIT $1 OFFSET $2`,
+      [limit, offset],
+    ),
+    // count ไม่ต้อง join — filter อ้างเฉพาะคอลัมน์ของ activities a
+    query(`SELECT COUNT(*)::int AS total FROM activities a WHERE ${whereSql}`),
+  ]);
+  return { items: listRes.rows, total: countRes.rows[0].total };
 }
 
 // public search: WORK + COMPLETED ทุกปี + match q บน title/code/location/organization

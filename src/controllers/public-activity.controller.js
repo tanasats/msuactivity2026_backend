@@ -26,7 +26,10 @@ export async function list(req, res) {
   if (!Number.isInteger(limit) || limit < 1) limit = 12;
   if (limit > MAX_LIMIT) limit = MAX_LIMIT;
 
-  const items = await listPublicActivities({ filter, limit });
+  let offset = Number.parseInt(req.query.offset, 10);
+  if (!Number.isInteger(offset) || offset < 0) offset = 0;
+
+  const { items, total } = await listPublicActivities({ filter, limit, offset });
   // แปะ presigned poster URL ทุก item แบบ parallel
   const decorated = await Promise.all(
     items.map(async (a) => {
@@ -37,7 +40,7 @@ export async function list(req, res) {
       };
     }),
   );
-  res.json({ items: decorated, filter, limit });
+  res.json({ items: decorated, filter, limit, offset, total });
 }
 
 // GET /api/public/activities/search?q=&limit=
