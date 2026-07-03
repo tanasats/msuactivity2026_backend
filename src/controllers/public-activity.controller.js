@@ -2,6 +2,7 @@ import {
   listPublicActivities,
   getPublicActivityDetail,
   searchPublicActivities,
+  listActivitiesForCalendar,
 } from '../models/public-activity.model.js';
 import { incrementViewCount } from '../models/activity-interest.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
@@ -67,6 +68,35 @@ export async function search(req, res) {
     }),
   );
   res.json({ items: decorated, q, limit });
+}
+
+// GET /api/public/activities/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD
+//   ปฏิทินกิจกรรม landing — from inclusive, to EXCLUSIVE (client ส่งช่วง grid ที่มองเห็น + pad)
+const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CALENDAR_MAX_DAYS = 92; // กันช่วงกว้างเกิน (client ขอทีละ ~1 เดือน + pad)
+
+export async function calendar(req, res) {
+  const { from, to } = req.query;
+  if (!CALENDAR_DATE_RE.test(from ?? '') || !CALENDAR_DATE_RE.test(to ?? '')) {
+    return res
+      .status(400)
+      .json({ status: 'error', message: 'from/to ต้องเป็นรูปแบบ YYYY-MM-DD' });
+  }
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs <= fromMs) {
+    return res
+      .status(400)
+      .json({ status: 'error', message: 'ช่วงวันที่ไม่ถูกต้อง (to ต้องมากกว่า from)' });
+  }
+  if ((toMs - fromMs) / 86_400_000 > CALENDAR_MAX_DAYS) {
+    return res
+      .status(400)
+      .json({ status: 'error', message: `ช่วงต้องไม่เกิน ${CALENDAR_MAX_DAYS} วัน` });
+  }
+
+  const items = await listActivitiesForCalendar({ from, to });
+  res.json({ items, from, to });
 }
 
 export async function detail(req, res) {

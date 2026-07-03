@@ -114,6 +114,37 @@ export async function searchPublicActivities(q, limit = 20) {
   return rows;
 }
 
+// calendar: กิจกรรม (WORK + COMPLETED) ที่ช่วงวันจัด [start_at, end_at] คาบเกี่ยวกับ [from, to)
+//   payload เบา — ไม่มี poster/presign (ปฏิทิน landing เรียกบ่อยตอนเลื่อนเดือน)
+//   overlap: start_at < to AND end_at >= from
+export async function listActivitiesForCalendar({ from, to }) {
+  const { rows } = await query(
+    `SELECT a.id, a.code, a.title, a.start_at, a.end_at,
+            a.capacity, a.registered_count,
+            a.registration_open_at, a.registration_close_at,
+            c.code AS category_code, c.name AS category_name,
+            -- คณะที่เปิดรับ ([] = ทุกคณะ) — panel ใต้ปฏิทินใช้แสดง scope เหมือนการ์ด
+            COALESCE(
+              (SELECT json_agg(
+                        json_build_object('id', f.id, 'code', f.code, 'name', f.name)
+                        ORDER BY f.code
+                      )
+                 FROM activity_eligible_faculties ef
+                 JOIN faculties f ON f.id = ef.faculty_id
+                WHERE ef.activity_id = a.id),
+              '[]'
+            ) AS eligible_faculties
+       FROM activities a
+       JOIN activity_categories c ON c.id = a.category_id
+      WHERE a.status IN ('WORK','COMPLETED')
+        AND a.start_at < $2
+        AND a.end_at   >= $1
+      ORDER BY a.start_at ASC`,
+    [from, to],
+  );
+  return rows;
+}
+
 // detail: WORK + COMPLETED — ให้ public ดูข้อมูลกิจกรรมที่จบไปแล้วได้
 //   (DELETED ตัดออกอัตโนมัติเพราะไม่อยู่ใน whitelist)
 export async function getPublicActivityDetail(id) {
