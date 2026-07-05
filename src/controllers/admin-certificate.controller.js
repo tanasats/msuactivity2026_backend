@@ -5,6 +5,7 @@ import {
   listAllRequests,
   rejectRequest,
 } from '../models/admin-certificate.model.js';
+import { emit } from '../services/notification.service.js';
 
 const VALID_STATUSES = new Set(['REQUESTED', 'APPROVED', 'REJECTED', 'ISSUED']);
 
@@ -66,6 +67,7 @@ export async function approve(req, res) {
       'อนุมัติได้เฉพาะคำขอที่อยู่ในสถานะ "รอตรวจสอบ"',
     );
   }
+  emit('certificate.approved', { userId: updated.user_id, certificate: { id: updated.id } });
   res.json({ status: 'ok', certificate: updated });
 }
 
@@ -90,6 +92,11 @@ export async function reject(req, res) {
       'ปฏิเสธได้เฉพาะคำขอที่อยู่ในสถานะ "รอตรวจสอบ"',
     );
   }
+  emit('certificate.rejected', {
+    userId: updated.user_id,
+    certificate: { id: updated.id },
+    reason,
+  });
   res.json({ status: 'ok', certificate: updated });
 }
 
@@ -123,5 +130,6 @@ export async function issue(req, res) {
   if (result.duplicate_doc) {
     return err(res, 409, `เลขที่เอกสาร "${document_no}" ถูกใช้ไปแล้ว`);
   }
+  emit('certificate.issued', { userId: result.user_id, certificate: { id: result.id } });
   res.json({ status: 'ok', certificate: result });
 }

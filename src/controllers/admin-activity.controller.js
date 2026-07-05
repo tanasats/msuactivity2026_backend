@@ -8,6 +8,7 @@ import {
 import { getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
 import { sanitizeRichText } from '../utils/sanitize-html.js';
+import { emit } from '../services/notification.service.js';
 
 const ALLOWED_STATUSES = new Set([
   'DRAFT',
@@ -175,6 +176,15 @@ export async function approve(req, res) {
     action: AUDIT.APPROVE,
     after: { status: 'WORK', code: result.code },
     ...auditMetaFromReq(req),
+  });
+  // แจ้งเตือนเจ้าของกิจกรรม (best-effort, ไม่ await เพื่อไม่หน่วง response)
+  emit('activity.approved', {
+    activity: {
+      id: result.id,
+      title: result.title,
+      created_by: result.created_by,
+      code: result.code,
+    },
   });
   res.json({ status: 'ok', activity: result });
 }
@@ -583,6 +593,10 @@ export async function reject(req, res) {
     after: { status: 'DRAFT' },
     note: reason,
     ...auditMetaFromReq(req),
+  });
+  emit('activity.rejected', {
+    activity: { id: result.id, title: result.title, created_by: result.created_by },
+    reason,
   });
   res.json({ status: 'ok', activity: result });
 }

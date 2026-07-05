@@ -5,6 +5,7 @@ import {
   listMyRequests,
 } from '../models/student-certificate.model.js';
 import { getActiveRule } from '../models/cert-requirement.model.js';
+import { emit } from '../services/notification.service.js';
 
 function err(res, status, message, extra = {}) {
   return res.status(status).json({ status: 'error', message, ...extra });
@@ -41,6 +42,7 @@ export async function requestCertificate(req, res) {
       reason: result.reason,
     });
   }
+  emit('certificate.requested', { certificate: { id: result.certificate.id } });
   res.status(201).json({ status: 'ok', certificate: result.certificate });
 }
 

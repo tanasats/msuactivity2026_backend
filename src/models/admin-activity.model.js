@@ -317,7 +317,7 @@ export async function approveActivity(id, approverId) {
               updated_at       = now()
         WHERE id = $1
           AND status = 'PENDING_APPROVAL'
-        RETURNING id, status, code, approved_at, approved_by`,
+        RETURNING id, status, code, approved_at, approved_by, title, created_by`,
       [id, code, approverId],
     );
 
@@ -342,7 +342,7 @@ export async function rejectActivity(id, reason) {
             updated_at       = now()
       WHERE id = $1
         AND status = 'PENDING_APPROVAL'
-      RETURNING id, status, rejection_reason`,
+      RETURNING id, status, rejection_reason, title, created_by`,
     [id, reason],
   );
   return rows[0] || null;

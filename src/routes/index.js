@@ -11,6 +11,7 @@ import facultiesRoutes from './faculties.routes.js';
 import studentRoutes from './student.routes.js';
 import adminRoutes from './admin.routes.js';
 import userAdminRoutes from './user-admin.routes.js';
+import meRoutes from './me.routes.js';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/faculty', facultyRoutes);
 router.use('/student', studentRoutes);
 router.use('/admin', adminRoutes);
 router.use('/users', userAdminRoutes);
+router.use('/me', meRoutes);
 
 export default router;

@@ -512,10 +512,13 @@ export async function bulkAddByMsuIds(activityId, msuIds, staffId) {
 export async function findRegistrationWithActivity(registrationId) {
   const { rows } = await query(
     `SELECT r.id              AS registration_id,
+            r.user_id,
             r.status,
             r.activity_id,
+            r.evaluation_status,
             a.created_by       AS activity_created_by,
-            a.faculty_id       AS activity_faculty_id
+            a.faculty_id       AS activity_faculty_id,
+            a.title            AS activity_title
        FROM registrations r
        JOIN activities a ON a.id = r.activity_id
       WHERE r.id = $1`,

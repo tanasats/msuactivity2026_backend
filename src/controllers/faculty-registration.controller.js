@@ -27,6 +27,14 @@ import {
   buildParticipantsWorkbook,
   contentDispositionAttachment,
 } from '../utils/excel-participants.js';
+import { emit } from '../services/notification.service.js';
+
+// สร้าง ctx.activity/registration สำหรับ emit จาก reg ที่โหลดมา (findRegistrationWithActivity)
+const regNotifyCtx = (reg, regId) => ({
+  userId: reg.user_id,
+  activity: { id: reg.activity_id, title: reg.activity_title },
+  registration: { id: regId },
+});
 
 const EVALUATION_RESULTS = new Set(['PASSED', 'FAILED']);
 
@@ -113,6 +121,7 @@ export async function approve(req, res) {
     after: { status: 'REGISTERED' },
     ...auditMetaFromReq(req),
   });
+  emit('registration.approved', regNotifyCtx(ctx.reg, ctx.regId));
   res.json({ status: 'ok', registration: result });
 }
 
@@ -193,6 +202,7 @@ export async function evaluate(req, res) {
     note,
     ...auditMetaFromReq(req),
   });
+  emit('attendance.evaluated', { ...regNotifyCtx(ctx.reg, ctx.regId), result });
   res.json({ status: 'ok', registration: updated });
 }
 

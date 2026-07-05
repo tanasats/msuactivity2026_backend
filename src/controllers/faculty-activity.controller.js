@@ -7,6 +7,7 @@ import {
   buildDiff,
   ACTIVITY_AUDIT_ACTIONS as AUDIT,
 } from '../models/activity-audit.model.js';
+import { emit } from '../services/notification.service.js';
 
 // field ที่ track diff เมื่อ faculty edit (full DRAFT mode)
 const FULL_EDIT_DIFF_FIELDS = [
@@ -757,6 +758,8 @@ export async function submit(req, res) {
     after: { status: 'PENDING_APPROVAL' },
     ...auditMetaFromReq(req),
   });
+  // แจ้ง admin/super_admin ว่ามีกิจกรรมรออนุมัติ (best-effort)
+  emit('activity.pending_approval', { activity: { id, title: existing.title } });
   const updated = await decoratePoster(await activities.findById(id));
   res.json({
     ...updated,

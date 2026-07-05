@@ -110,7 +110,7 @@ export async function approveRequest(id, actorId) {
             reviewed_at = now(),
             updated_at  = now()
       WHERE id = $1 AND status = 'REQUESTED'
-      RETURNING id, status, reviewed_at`,
+      RETURNING id, user_id, status, reviewed_at`,
     [id, actorId],
   );
   return rows[0] ?? null;
@@ -126,7 +126,7 @@ export async function rejectRequest(id, reason, actorId) {
             rejected_reason = $3,
             updated_at      = now()
       WHERE id = $1 AND status = 'REQUESTED'
-      RETURNING id, status, reviewed_at, rejected_reason`,
+      RETURNING id, user_id, status, reviewed_at, rejected_reason`,
     [id, actorId, reason],
   );
   return rows[0] ?? null;
@@ -155,7 +155,7 @@ export async function issueRequest(id, { document_no, pdf_storage_key = null }, 
                 reviewed_at     = COALESCE(reviewed_at, now()),
                 updated_at      = now()
           WHERE id = $1 AND status = 'APPROVED'
-          RETURNING id, status, issued_at, document_no`,
+          RETURNING id, user_id, status, issued_at, document_no`,
         [id, document_no, pdf_storage_key, actorId],
       );
       updated = rows[0] ?? null;
