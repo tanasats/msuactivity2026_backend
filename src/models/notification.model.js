@@ -12,6 +12,15 @@ export async function getActiveUsersByRole(roles) {
   return rows;
 }
 
+// email ของ user ids (ใช้ตอน email channel enrich ผู้รับที่ resolver ไม่ได้แนบ email มา)
+export async function getEmailsByIds(ids) {
+  const map = new Map();
+  if (!ids?.length) return map;
+  const { rows } = await query(`SELECT id, email FROM users WHERE id = ANY($1)`, [ids]);
+  for (const r of rows) map.set(r.id, r.email);
+  return map;
+}
+
 // batch insert แจ้งเตือน in-app — กันซ้ำด้วย dedupe_key (unique) → ON CONFLICT DO NOTHING
 //   rows: [{ userId, eventType, category, title, body, linkUrl,
 //            relatedActivityId, relatedRegistrationId, dedupeKey }]

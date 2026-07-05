@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import routes from './routes/index.js';
 import { notFound, errorHandler } from './middlewares/error.middleware.js';
+import { startEmailWorker } from './workers/email-worker.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
@@ -24,3 +25,8 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   console.log(`Backend listening on http://localhost:${PORT}`);
 });
+
+// email worker — เปิดเฉพาะ instance เดียว (env flag) กันส่งเมลซ้ำตอน scale
+if (process.env.EMAIL_WORKER_ENABLED === 'true') {
+  startEmailWorker();
+}

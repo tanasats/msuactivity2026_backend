@@ -5,12 +5,24 @@
 
 import { EVENTS, CHANNELS, categoryDefault } from '../notifications/catalog.js';
 import * as prefModel from '../models/notification-preference.model.js';
+import { getEmailsByIds } from '../models/notification.model.js';
 import { inAppChannel } from './channels/in-app.channel.js';
+import { emailChannel } from './channels/email.channel.js';
 
 const CHANNEL_ADAPTERS = {
   in_app: inAppChannel,
-  // email: emailChannel,  // ← เฟส 4
+  email: emailChannel,
 };
+
+// email channel ต้องมี .email ต่อผู้รับ — resolver บางตัวส่งมาแค่ { id } → เติมให้
+async function withEmails(recipients) {
+  const missing = recipients.filter((r) => !r.email).map((r) => r.id);
+  if (!missing.length) return recipients;
+  const map = await getEmailsByIds(missing);
+  return recipients
+    .map((r) => (r.email ? r : { ...r, email: map.get(r.id) }))
+    .filter((r) => r.email);
+}
 
 // user รับ (category, channel) นี้ไหม
 //   master ช่องทางปิด → ไม่รับ; ไม่งั้นใช้ override รายหมวด หรือ default ในโค้ด
@@ -44,9 +56,11 @@ export async function emit(eventType, ctx = {}) {
 
       if (!(await prefModel.getChannelGlobalEnabled(channel))) continue; // kill-switch
 
-      const allowed = recipients.filter((r) =>
+      let allowed = recipients.filter((r) =>
         isEnabled(prefMap.get(r.id), category, channel),
       );
+      if (!allowed.length) continue;
+      if (channel === 'email') allowed = await withEmails(allowed); // เติม email
       if (!allowed.length) continue;
 
       await adapter.deliver(allowed, { eventType, category, rendered });

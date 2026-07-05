@@ -1,6 +1,7 @@
 import * as model from '../models/notification.model.js';
 import * as prefModel from '../models/notification-preference.model.js';
 import { CATEGORIES, CHANNELS, categoryDefault } from '../notifications/catalog.js';
+import { verifyTransport, sendMail } from '../utils/mailer.js';
 
 const MAX_LIMIT = 50;
 const CHANNEL_LABELS = { in_app: 'ในเว็บ', email: 'อีเมล' };
@@ -105,4 +106,31 @@ export async function updatePreferences(req, res) {
   }
   const saved = await prefModel.upsert(req.user.id, { channels, prefs });
   res.json({ status: 'ok', ...saved });
+}
+
+// ── D3: ส่งเมลทดสอบ (admin) — ตรวจการเชื่อมต่อ SMTP + ส่งจริง 1 ฉบับ ─
+// POST /api/admin/email/test  body: { to?: string }  (ไม่ระบุ → อีเมลของ admin ที่เรียก)
+export async function sendTestEmail(req, res) {
+  let to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
+  if (!to) {
+    const map = await model.getEmailsByIds([req.user.id]);
+    to = map.get(req.user.id) ?? '';
+  }
+  if (!to) {
+    return res.status(400).json({ status: 'error', message: 'ไม่พบอีเมลผู้รับ' });
+  }
+  try {
+    await verifyTransport(); // login SMTP ผ่านไหม
+    const info = await sendMail({
+      to,
+      subject: '[MSU Activity] ทดสอบระบบส่งอีเมล',
+      text: 'อีเมลทดสอบจากระบบกิจกรรมนิสิต มมส. — ถ้าได้รับแสดงว่า SMTP ใช้งานได้',
+      html: '<p>อีเมลทดสอบจาก <b>ระบบกิจกรรมนิสิต มมส.</b></p><p>ถ้าคุณได้รับ แสดงว่าการตั้งค่า SMTP ใช้งานได้ ✅</p>',
+    });
+    // ถ้า dev เปิด redirect อยู่ แจ้งให้ frontend รู้ว่าเมลไปที่อื่น (กันงง)
+    const redirected = process.env.EMAIL_REDIRECT_ALL?.trim() || null;
+    res.json({ status: 'ok', to, redirected_to: redirected, message_id: info.messageId });
+  } catch (err) {
+    res.status(502).json({ status: 'error', message: `ส่งไม่สำเร็จ: ${err.message}` });
+  }
 }

@@ -65,6 +65,7 @@ import {
   create as createCertRule,
   get as getCertRules,
 } from '../controllers/cert-requirement.controller.js';
+import { sendTestEmail } from '../controllers/notification.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -227,5 +228,8 @@ router.post(
   requireRole('super_admin'),
   asyncHandler(createCertRule),
 );
+
+// D3: ส่งเมลทดสอบ (ตรวจการเชื่อมต่อ SMTP)
+router.post('/email/test', asyncHandler(sendTestEmail));
 
 export default router;
