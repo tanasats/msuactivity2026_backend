@@ -18,27 +18,27 @@ export const CATEGORIES = {
   registration: {
     label: 'สถานะการสมัคร',
     roles: ['student'],
-    default: { in_app: true, email: true },
+    default: { in_app: true, email: false },
   },
   attendance: {
     label: 'การเช็คอิน / ผลประเมิน',
     roles: ['student'],
-    default: { in_app: true, email: true },
+    default: { in_app: true, email: false },
   },
   certificate: {
     label: 'ใบรับรอง / Transcript',
     roles: ['student'],
-    default: { in_app: true, email: true },
+    default: { in_app: true, email: false },
   },
   activity_reminder: {
     label: 'เตือนก่อนกิจกรรม / กิจกรรมเปลี่ยนแปลง',
     roles: ['student'],
-    default: { in_app: true, email: true },
+    default: { in_app: true, email: false },
   },
   interest_reminder: {
     label: 'กิจกรรมที่สนใจใกล้เปิดรับสมัคร',
     roles: ['student'],
-    default: { in_app: true, email: true },
+    default: { in_app: true, email: false },
   },
   activity_workflow: {
     label: 'ความเคลื่อนไหวกิจกรรมที่ฉันสร้าง',
