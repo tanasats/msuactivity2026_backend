@@ -25,6 +25,9 @@ const SETTING_SCHEMA = {
     min: 0,
     max: 240,
   },
+  // kill-switch ระดับระบบของการแจ้งเตือน (super_admin เปิด/ปิดทั้งช่องทาง)
+  'notify.in_app.enabled': { type: 'boolean' },
+  'notify.email.enabled': { type: 'boolean' },
 };
 
 function validateValue(schema, value) {
@@ -38,6 +41,11 @@ function validateValue(schema, value) {
       };
     }
     return { ok: true, value: n };
+  }
+  if (schema.type === 'boolean') {
+    if (value === true || value === 'true') return { ok: true, value: true };
+    if (value === false || value === 'false') return { ok: true, value: false };
+    return { ok: false, message: 'ต้องเป็น true หรือ false' };
   }
   return { ok: false, message: 'ไม่รองรับ type นี้' };
 }
