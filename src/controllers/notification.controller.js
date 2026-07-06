@@ -1,10 +1,42 @@
 import * as model from '../models/notification.model.js';
 import * as prefModel from '../models/notification-preference.model.js';
-import { CATEGORIES, CHANNELS, categoryDefault } from '../notifications/catalog.js';
+import * as annModel from '../models/announcement.model.js';
+import { CATEGORIES, CHANNELS, categoryDefault, categoryChannels } from '../notifications/catalog.js';
 import { verifyTransport, sendMail } from '../utils/mailer.js';
+import { enqueueMany } from '../models/email-outbox.model.js';
+import { renderEmail } from '../emails/layout.js';
+import { logMessagesSent } from '../models/user-audit.model.js';
+import { auditMetaFromReq } from '../models/activity-audit.model.js';
+
+const MAX_MESSAGE_RECIPIENTS = 500; // cap กัน param-limit (ส่งกลุ่มใหญ่เป็นฟีเจอร์แยก)
 
 const MAX_LIMIT = 50;
 const CHANNEL_LABELS = { in_app: 'ในเว็บ', email: 'อีเมล' };
+
+// ประกาศ (broadcast) แสดงในกระดิ่งไหม — เคารพ preference in-app หมวด announcement (default เปิด)
+function announcementInAppEnabled(pref) {
+  if (pref?.channels?.in_app === false) return false;
+  const o = pref?.prefs?.announcement?.in_app;
+  return o === undefined ? categoryDefault('announcement', 'in_app') : o !== false;
+}
+
+// map ประกาศ → feed item (source='announcement') ให้ shape เดียวกับ notification ส่วนตัว
+function announcementToItem(a, isRead) {
+  return {
+    source: 'announcement',
+    id: a.id,
+    event_type: 'announcement',
+    category: 'announcement',
+    title: a.title ?? 'ประกาศ',
+    body: a.body ?? null,
+    link_url: a.link_url ?? null,
+    related_activity_id: null,
+    related_registration_id: null,
+    is_read: isRead,
+    read_at: null,
+    created_at: a.created_at,
+  };
+}
 
 // GET /api/me/notifications?unread_only=&limit=&before=
 export async function list(req, res) {
@@ -18,11 +50,37 @@ export async function list(req, res) {
       ? req.query.before
       : null;
 
-  const [items, unread] = await Promise.all([
-    model.listForUser(req.user.id, { unreadOnly, limit, before }),
-    model.unreadCount(req.user.id),
+  const userId = req.user.id;
+  const [personal, personalUnread, pref] = await Promise.all([
+    model.listForUser(userId, { unreadOnly, limit, before }),
+    model.unreadCount(userId),
+    prefModel.get(userId),
   ]);
-  res.json({ items, unread_count: unread });
+
+  // ผสมประกาศ active (broadcast) — 1 แถว/ประกาศ + read-state (ไม่ fan-out)
+  let annItems = [];
+  let annUnread = 0;
+  if (announcementInAppEnabled(pref)) {
+    const visible = await annModel.listVisibleForUser(req.user.role, req.user.faculty_id);
+    if (visible.length) {
+      const readSet = await annModel.getReadAnnouncementIds(
+        userId,
+        visible.map((a) => a.id),
+      );
+      annUnread = visible.filter((a) => !readSet.has(a.id)).length;
+      annItems = visible.map((a) => announcementToItem(a, readSet.has(a.id)));
+      if (unreadOnly) annItems = annItems.filter((i) => !i.is_read);
+    }
+  }
+
+  const items = [
+    ...personal.map((n) => ({ ...n, source: 'personal' })),
+    ...annItems,
+  ]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, limit);
+
+  res.json({ items, unread_count: personalUnread + annUnread });
 }
 
 // POST /api/me/notifications/:id/read
@@ -35,9 +93,24 @@ export async function markRead(req, res) {
   res.json({ status: 'ok', changed });
 }
 
-// POST /api/me/notifications/read-all
+// POST /api/me/notifications/read-all — อ่านทั้ง notification ส่วนตัว + ประกาศ active
 export async function markAllRead(req, res) {
-  const changed = await model.markAllRead(req.user.id);
+  const changedPersonal = await model.markAllRead(req.user.id);
+  const visible = await annModel.listVisibleForUser(req.user.role, req.user.faculty_id);
+  const changedAnn = await annModel.markAnnouncementsRead(
+    req.user.id,
+    visible.map((a) => a.id),
+  );
+  res.json({ status: 'ok', changed: changedPersonal + changedAnn });
+}
+
+// POST /api/me/announcements/:id/read — อ่านประกาศ broadcast 1 รายการ
+export async function markAnnouncementReadCtrl(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ status: 'error', message: 'invalid id' });
+  }
+  const changed = await annModel.markAnnouncementRead(req.user.id, id);
   res.json({ status: 'ok', changed });
 }
 
@@ -65,12 +138,13 @@ export async function getPreferences(req, res) {
   const categories = Object.entries(CATEGORIES)
     .filter(([, meta]) => meta.roles.includes(role))
     .map(([key, meta]) => {
+      const channels = categoryChannels(key); // ช่องทางที่หมวดนี้ส่งได้จริง
       const values = {};
       for (const ch of CHANNELS) {
         const override = pref?.prefs?.[key]?.[ch];
         values[ch] = override === undefined ? categoryDefault(key, ch) : override !== false;
       }
-      return { key, label: meta.label, values };
+      return { key, label: meta.label, channels, values };
     });
 
   res.json({ channels_meta: channelsMeta, master, categories });
@@ -106,6 +180,91 @@ export async function updatePreferences(req, res) {
   }
   const saved = await prefModel.upsert(req.user.id, { channels, prefs });
   res.json({ status: 'ok', ...saved });
+}
+
+// ── admin ส่งข้อความแจ้งเตือนถึงผู้ใช้รายบุคคล (in-app เสมอ + email ถ้าเลือก) ─
+// POST /api/admin/notifications/message
+//   body: { user_ids: number[], title, body, link_url?, send_email?: bool }
+//   in-app: ส่งถึงเสมอ (bypass preference) · email: ถ้า send_email + kill-switch เปิด (ไม่เช็ค pref รายคน)
+export async function sendAdminMessage(req, res) {
+  const b = req.body ?? {};
+
+  const ids = Array.isArray(b.user_ids)
+    ? [...new Set(b.user_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+    : [];
+  if (!ids.length) {
+    return res.status(400).json({ status: 'error', message: 'ต้องเลือกผู้รับอย่างน้อย 1 คน' });
+  }
+  if (ids.length > MAX_MESSAGE_RECIPIENTS) {
+    return res.status(400).json({
+      status: 'error',
+      message: `ผู้รับต้องไม่เกิน ${MAX_MESSAGE_RECIPIENTS} คนต่อข้อความ`,
+    });
+  }
+
+  const title = (typeof b.title === 'string' ? b.title.trim() : '').slice(0, 200);
+  const body = (typeof b.body === 'string' ? b.body.trim() : '').slice(0, 2000);
+  if (!title) return res.status(400).json({ status: 'error', message: 'ต้องระบุหัวข้อ' });
+  if (!body) return res.status(400).json({ status: 'error', message: 'ต้องระบุข้อความ' });
+  const linkUrl =
+    typeof b.link_url === 'string' && b.link_url.trim()
+      ? b.link_url.trim().slice(0, 500)
+      : null;
+  const sendEmail = b.send_email === true;
+
+  // in-app — ส่งถึงเสมอ (ไม่เช็ค preference)
+  const inApp = await model.insertMany(
+    ids.map((uid) => ({
+      userId: uid,
+      eventType: 'admin.message',
+      category: 'admin_message',
+      title,
+      body,
+      linkUrl,
+      dedupeKey: null,
+    })),
+  );
+
+  // email — เฉพาะเมื่อ admin เลือก + kill-switch ระบบเปิด (ไม่เช็ค pref รายคน)
+  let emailQueued = 0;
+  let emailSkipped = null;
+  if (sendEmail) {
+    if (await prefModel.getChannelGlobalEnabled('email')) {
+      const emailMap = await model.getEmailsByIds(ids);
+      const { subject, html, text } = renderEmail({ title, body, link_url: linkUrl });
+      emailQueued = await enqueueMany(
+        ids
+          .map((uid) => ({
+            eventType: 'admin.message',
+            toUserId: uid,
+            toEmail: emailMap.get(uid),
+            subject,
+            bodyHtml: html,
+            bodyText: text,
+            dedupeKey: null,
+          }))
+          .filter((r) => r.toEmail),
+      );
+    } else {
+      emailSkipped = 'ระบบปิดการส่งอีเมลอยู่ (super_admin kill-switch)';
+    }
+  }
+
+  // audit — 1 แถว/ผู้รับ (ใครส่ง/ถึงใคร/อะไร)
+  await logMessagesSent(
+    req.user.id,
+    ids,
+    { title, channels: sendEmail ? ['in_app', 'email'] : ['in_app'] },
+    auditMetaFromReq(req),
+  );
+
+  res.json({
+    status: 'ok',
+    recipients: ids.length,
+    in_app: inApp,
+    email_queued: emailQueued,
+    email_skipped: emailSkipped,
+  });
 }
 
 // ── D3: ส่งเมลทดสอบ (admin) — ตรวจการเชื่อมต่อ SMTP + ส่งจริง 1 ฉบับ ─

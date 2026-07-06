@@ -2,9 +2,13 @@ import { query } from '../db/index.js';
 
 // ── email_outbox model ───────────────────────────────────────────
 
+// chunk ปลอดภัย: 1000 แถว × 9 คอลัมน์ = 9000 params < 65535 (Postgres bind limit)
+const ENQUEUE_CHUNK = 1000;
+
 // enqueue หลายฉบับ — กันซ้ำด้วย dedupe_key (unique) → ON CONFLICT DO NOTHING
 //   rows: [{ eventType, toUserId, toEmail, subject, bodyHtml, bodyText,
 //            relatedActivityId, relatedRegistrationId, dedupeKey }]
+//   แบ่ง chunk กัน "too many parameters" ตอน fan-out ใหญ่
 export async function enqueueMany(rows) {
   if (!rows?.length) return 0;
   const cols = [
@@ -18,30 +22,35 @@ export async function enqueueMany(rows) {
     'related_registration_id',
     'dedupe_key',
   ];
-  const values = [];
-  const params = [];
-  rows.forEach((r, i) => {
-    const base = i * cols.length;
-    values.push(`(${cols.map((_, j) => `$${base + j + 1}`).join(', ')})`);
-    params.push(
-      r.eventType,
-      r.toUserId ?? null,
-      r.toEmail,
-      r.subject,
-      r.bodyHtml,
-      r.bodyText ?? null,
-      r.relatedActivityId ?? null,
-      r.relatedRegistrationId ?? null,
-      r.dedupeKey ?? null,
+  let total = 0;
+  for (let start = 0; start < rows.length; start += ENQUEUE_CHUNK) {
+    const chunk = rows.slice(start, start + ENQUEUE_CHUNK);
+    const values = [];
+    const params = [];
+    chunk.forEach((r, i) => {
+      const base = i * cols.length;
+      values.push(`(${cols.map((_, j) => `$${base + j + 1}`).join(', ')})`);
+      params.push(
+        r.eventType,
+        r.toUserId ?? null,
+        r.toEmail,
+        r.subject,
+        r.bodyHtml,
+        r.bodyText ?? null,
+        r.relatedActivityId ?? null,
+        r.relatedRegistrationId ?? null,
+        r.dedupeKey ?? null,
+      );
+    });
+    const { rowCount } = await query(
+      `INSERT INTO email_outbox (${cols.join(', ')})
+       VALUES ${values.join(', ')}
+       ON CONFLICT (dedupe_key) DO NOTHING`,
+      params,
     );
-  });
-  const { rowCount } = await query(
-    `INSERT INTO email_outbox (${cols.join(', ')})
-     VALUES ${values.join(', ')}
-     ON CONFLICT (dedupe_key) DO NOTHING`,
-    params,
-  );
-  return rowCount;
+    total += rowCount;
+  }
+  return total;
 }
 
 // claim งานที่ถึงเวลาส่ง — atomic ด้วย FOR UPDATE SKIP LOCKED (รองรับหลาย worker)

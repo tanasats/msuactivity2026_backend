@@ -39,6 +39,15 @@ function parseDateTime(v) {
 // validate payload — return { ok:true, value } or { ok:false, message }
 //   isCreate=true: required fields ต้องครบ
 //   isCreate=false (patch): field ที่ undefined = ไม่แก้
+const VALID_ROLES = new Set([
+  'student',
+  'faculty_staff',
+  'executive',
+  'admin',
+  'super_admin',
+  'staff',
+]);
+
 function normalizePayload(body, isCreate) {
   const out = {};
 
@@ -120,6 +129,32 @@ function normalizePayload(body, isCreate) {
     if (typeof body.is_active !== 'boolean')
       return { ok: false, message: 'is_active ต้องเป็น boolean' };
     out.is_active = body.is_active;
+  }
+
+  // targeting — audience_roles / audience_faculty_ids (null/[] = ทุกคน)
+  if (body.audience_roles !== undefined) {
+    if (body.audience_roles === null) {
+      out.audience_roles = null;
+    } else if (
+      !Array.isArray(body.audience_roles) ||
+      !body.audience_roles.every((r) => VALID_ROLES.has(r))
+    ) {
+      return { ok: false, message: 'audience_roles ต้องเป็น array ของ role ที่ถูกต้อง' };
+    } else {
+      out.audience_roles = [...new Set(body.audience_roles)];
+    }
+  }
+  if (body.audience_faculty_ids !== undefined) {
+    if (body.audience_faculty_ids === null) {
+      out.audience_faculty_ids = null;
+    } else if (
+      !Array.isArray(body.audience_faculty_ids) ||
+      !body.audience_faculty_ids.every((n) => Number.isInteger(n) && n > 0)
+    ) {
+      return { ok: false, message: 'audience_faculty_ids ต้องเป็น array ของ id คณะ' };
+    } else {
+      out.audience_faculty_ids = [...new Set(body.audience_faculty_ids)];
+    }
   }
 
   return { ok: true, value: out };

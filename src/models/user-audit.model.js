@@ -4,7 +4,27 @@ export const AUDIT_ACTIONS = Object.freeze({
   ROLE_CHANGE: 'role_change',
   FACULTY_CHANGE: 'faculty_change',
   STATUS_CHANGE: 'status_change',
+  MESSAGE_SENT: 'message_sent',
 });
+
+// batch audit — บันทึก "admin ส่งข้อความถึงผู้ใช้หลายคน" ทีเดียว (1 แถว/ผู้รับ)
+//   after = { title, channels } เก็บ snapshot ว่าส่งอะไร
+export async function logMessagesSent(actorId, targetUserIds, after, { ip = null, user_agent = null } = {}) {
+  if (!targetUserIds?.length) return 0;
+  const afterJson = JSON.stringify(after ?? {});
+  const values = [];
+  const params = [actorId, AUDIT_ACTIONS.MESSAGE_SENT, afterJson, ip, user_agent];
+  targetUserIds.forEach((uid, i) => {
+    params.push(uid);
+    values.push(`($1, $${params.length}, $2, $3, $4, $5)`);
+  });
+  const { rowCount } = await query(
+    `INSERT INTO user_audit_logs (actor_id, target_user_id, action, after, ip, user_agent)
+     VALUES ${values.join(', ')}`,
+    params,
+  );
+  return rowCount;
+}
 
 export async function createAuditLog({
   actor_id,

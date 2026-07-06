@@ -25,6 +25,10 @@ export async function getEmailsByIds(ids) {
 //   rows: [{ userId, eventType, category, title, body, linkUrl,
 //            relatedActivityId, relatedRegistrationId, dedupeKey }]
 //   คืนจำนวนที่ insert จริง (ที่ไม่ชน dedupe)
+// chunk ขนาดปลอดภัยต่อ 1 คำสั่ง: 1000 แถว × 9 คอลัมน์ = 9000 params < 65535 (Postgres bind limit)
+//   fan-out ใหญ่ (เช่น แจ้งผู้สมัครทุกคน) แบ่งเป็นหลายคำสั่ง กัน "too many parameters"
+const INSERT_CHUNK = 1000;
+
 export async function insertMany(rows) {
   if (!rows?.length) return 0;
   const cols = [
@@ -38,30 +42,35 @@ export async function insertMany(rows) {
     'related_registration_id',
     'dedupe_key',
   ];
-  const values = [];
-  const params = [];
-  rows.forEach((r, i) => {
-    const base = i * cols.length;
-    values.push(`(${cols.map((_, j) => `$${base + j + 1}`).join(', ')})`);
-    params.push(
-      r.userId,
-      r.eventType,
-      r.category,
-      r.title,
-      r.body ?? null,
-      r.linkUrl ?? null,
-      r.relatedActivityId ?? null,
-      r.relatedRegistrationId ?? null,
-      r.dedupeKey ?? null,
+  let total = 0;
+  for (let start = 0; start < rows.length; start += INSERT_CHUNK) {
+    const chunk = rows.slice(start, start + INSERT_CHUNK);
+    const values = [];
+    const params = [];
+    chunk.forEach((r, i) => {
+      const base = i * cols.length;
+      values.push(`(${cols.map((_, j) => `$${base + j + 1}`).join(', ')})`);
+      params.push(
+        r.userId,
+        r.eventType,
+        r.category,
+        r.title,
+        r.body ?? null,
+        r.linkUrl ?? null,
+        r.relatedActivityId ?? null,
+        r.relatedRegistrationId ?? null,
+        r.dedupeKey ?? null,
+      );
+    });
+    const { rowCount } = await query(
+      `INSERT INTO notifications (${cols.join(', ')})
+       VALUES ${values.join(', ')}
+       ON CONFLICT (dedupe_key) DO NOTHING`,
+      params,
     );
-  });
-  const { rowCount } = await query(
-    `INSERT INTO notifications (${cols.join(', ')})
-     VALUES ${values.join(', ')}
-     ON CONFLICT (dedupe_key) DO NOTHING`,
-    params,
-  );
-  return rowCount;
+    total += rowCount;
+  }
+  return total;
 }
 
 const FEED_COLUMNS = `
@@ -115,6 +124,16 @@ export async function markAllRead(userId) {
     `UPDATE notifications SET is_read = true, read_at = now()
       WHERE user_id = $1 AND is_read = false`,
     [userId],
+  );
+  return rowCount;
+}
+
+// retention — ลบ notification ที่ "อ่านแล้ว" และเก่ากว่า N วัน (กันตารางโต)
+export async function pruneReadOlderThan(days = 90) {
+  const { rowCount } = await query(
+    `DELETE FROM notifications
+      WHERE is_read = true AND created_at < now() - ($1 || ' days')::interval`,
+    [String(days)],
   );
   return rowCount;
 }

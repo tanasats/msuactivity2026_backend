@@ -59,8 +59,20 @@ export const CATEGORIES = {
     label: 'ข่าวสาร / ประกาศ',
     roles: ['student', 'faculty_staff', 'executive', 'admin', 'super_admin', 'staff'],
     default: { in_app: true, email: false },
+    channels: ['in_app'], // broadcast in-app เท่านั้น — ไม่มี email
+  },
+  message: {
+    label: 'ข้อความติดต่อ (คณะ ↔ ผู้ดูแล)',
+    roles: ['faculty_staff', 'admin', 'super_admin'],
+    default: { in_app: true, email: false },
+    channels: ['in_app'], // v1 in-app เท่านั้น
   },
 };
+
+// ช่องทางที่หมวดนี้ "ส่งได้จริง" (default = ทุกช่องทาง) — ใช้ซ่อน toggle ที่ไม่มีผล
+export function categoryChannels(category) {
+  return CATEGORIES[category]?.channels ?? CHANNELS;
+}
 
 // ── helper: format วันเวลาแบบไทย (Asia/Bangkok, พ.ศ.) ──────────────
 const dtFmt = new Intl.DateTimeFormat('th-TH', {
@@ -267,25 +279,34 @@ export const EVENTS = {
     }),
   },
 
-  // ===== ทุกคน =====
-  'announcement.published': {
-    category: 'announcement',
-    resolveRecipients: (ctx) =>
-      getActiveUsersByRole(ctx.audienceRoles ?? [
-        'student',
-        'faculty_staff',
-        'executive',
-        'admin',
-        'super_admin',
-        'staff',
-      ]),
+  // ===== ข้อความสองทาง faculty ↔ admin (alert) =====
+  //   link ต่างกันตาม role ผู้รับ → แยก 2 event (แต่ละอันฝัง link ฝั่งตัวเอง)
+  'message.to_admins': {
+    category: 'message',
+    resolveRecipients: () => getActiveUsersByRole(['admin', 'super_admin']),
     render: (ctx) => ({
-      title: ctx.announcement?.title ?? 'ประกาศใหม่',
-      body: ctx.announcement?.summary ?? 'มีประกาศใหม่จากระบบกิจกรรมนิสิต',
-      link_url: '/dashboard',
-      dedupe_key: `announcement.published:${ctx.announcement?.id}`,
+      title: `ข้อความจากคณะ: ${ctx.subject ?? ''}`.trim(),
+      body: `${ctx.senderName ?? 'เจ้าหน้าที่คณะ'}: ${ctx.preview ?? ''}`,
+      link_url: `/dashboard/admin/inbox/${ctx.threadId}`,
+      dedupe_key: `message.to_admins:${ctx.messageId}`,
     }),
   },
+  'message.to_faculty': {
+    category: 'message',
+    resolveRecipients: (ctx) => (ctx.createdBy ? [{ id: ctx.createdBy }] : []),
+    render: (ctx) => ({
+      title: `ผู้ดูแลตอบ: ${ctx.subject ?? ''}`.trim(),
+      body: `${ctx.senderName ?? 'ผู้ดูแล'}: ${ctx.preview ?? ''}`,
+      link_url: `/dashboard/faculty/messages/${ctx.threadId}`,
+      dedupe_key: `message.to_faculty:${ctx.messageId}`,
+    }),
+  },
+
+  // ===== ทุกคน =====
+  // หมายเหตุ: "ประกาศ" (announcement) ไม่ใช้ emit/fan-out ต่อผู้ใช้ (39k) —
+  //   ทำเป็น broadcast: เก็บ 1 แถวใน announcements + read-state (announcement_reads)
+  //   กระดิ่งผสมประกาศ active เข้ากับ notification ส่วนตัวเอง (ดู notification.controller)
+  //   หมวด 'announcement' ยังมีใน CATEGORIES ไว้คุม toggle in-app ของ broadcast
 };
 
 // default ของ (category, channel) — ใช้ตอน resolve preference ถ้าผู้ใช้ไม่ override

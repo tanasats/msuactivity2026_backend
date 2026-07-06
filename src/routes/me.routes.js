@@ -5,6 +5,7 @@ import {
   list as listNotifications,
   markRead as markNotificationRead,
   markAllRead as markAllNotificationsRead,
+  markAnnouncementReadCtrl,
   getPreferences,
   updatePreferences,
 } from '../controllers/notification.controller.js';
@@ -16,6 +17,7 @@ router.use(requireAuth);
 router.get('/notifications', asyncHandler(listNotifications));
 router.post('/notifications/read-all', asyncHandler(markAllNotificationsRead));
 router.post('/notifications/:id/read', asyncHandler(markNotificationRead));
+router.post('/announcements/:id/read', asyncHandler(markAnnouncementReadCtrl));
 
 router.get('/notification-preferences', asyncHandler(getPreferences));
 router.put('/notification-preferences', asyncHandler(updatePreferences));

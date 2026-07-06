@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import routes from './routes/index.js';
 import { notFound, errorHandler } from './middlewares/error.middleware.js';
 import { startEmailWorker } from './workers/email-worker.js';
+import { startRetentionWorker } from './workers/retention-worker.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
@@ -30,3 +31,6 @@ app.listen(PORT, () => {
 if (process.env.EMAIL_WORKER_ENABLED === 'true') {
   startEmailWorker();
 }
+
+// retention — ลบ notification เก่าอัตโนมัติ (idempotent, เปิดได้ทุก instance)
+startRetentionWorker();

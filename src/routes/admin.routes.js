@@ -65,7 +65,16 @@ import {
   create as createCertRule,
   get as getCertRules,
 } from '../controllers/cert-requirement.controller.js';
-import { sendTestEmail } from '../controllers/notification.controller.js';
+import {
+  sendTestEmail,
+  sendAdminMessage,
+} from '../controllers/notification.controller.js';
+import {
+  adminList as listMessageThreads,
+  adminGetThread as getMessageThread,
+  adminReply as replyMessageThread,
+  adminResolve as resolveMessageThread,
+} from '../controllers/message.controller.js';
 
 // endpoints สำหรับ admin / super_admin: บริหารจัดการกิจกรรมข้ามคณะ
 const router = Router();
@@ -231,5 +240,14 @@ router.post(
 
 // D3: ส่งเมลทดสอบ (ตรวจการเชื่อมต่อ SMTP)
 router.post('/email/test', asyncHandler(sendTestEmail));
+
+// admin ส่งข้อความแจ้งเตือนถึงผู้ใช้รายบุคคล
+router.post('/notifications/message', asyncHandler(sendAdminMessage));
+
+// inbox ข้อความจากคณะ (faculty ↔ admin)
+router.get('/message-threads', asyncHandler(listMessageThreads));
+router.get('/message-threads/:id', asyncHandler(getMessageThread));
+router.post('/message-threads/:id/messages', asyncHandler(replyMessageThread));
+router.post('/message-threads/:id/resolve', asyncHandler(resolveMessageThread));
 
 export default router;

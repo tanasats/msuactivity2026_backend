@@ -3,6 +3,12 @@ import multer from 'multer';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { requireAuth, requireRole } from '../middlewares/auth.middleware.js';
 import {
+  facultyCreate,
+  facultyList,
+  facultyGetThread,
+  facultyReply,
+} from '../controllers/message.controller.js';
+import {
   stats,
   academicYears,
   list,
@@ -71,6 +77,12 @@ const router = Router();
 
 router.use(requireAuth);
 router.use(requireRole('faculty_staff', 'admin', 'super_admin'));
+
+// ข้อความถึงผู้ดูแล (เฉพาะ faculty_staff — admin ใช้ inbox ฝั่ง admin)
+router.get('/message-threads', requireRole('faculty_staff'), asyncHandler(facultyList));
+router.post('/message-threads', requireRole('faculty_staff'), asyncHandler(facultyCreate));
+router.get('/message-threads/:id', requireRole('faculty_staff'), asyncHandler(facultyGetThread));
+router.post('/message-threads/:id/messages', requireRole('faculty_staff'), asyncHandler(facultyReply));
 
 router.get('/stats', asyncHandler(stats));
 router.get('/academic-years', asyncHandler(academicYears));
