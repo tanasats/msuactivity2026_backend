@@ -770,7 +770,7 @@ export async function submit(req, res) {
 }
 
 // POST /api/faculty/activities/:id/complete
-// ปิดโครงการ — เฉพาะผู้สร้างกิจกรรม + status WORK เท่านั้น
+// เสร็จสิ้นโครงการ — เฉพาะผู้สร้างกิจกรรม + status WORK เท่านั้น
 //   COMPLETED เป็น terminal state ในการมองของ faculty (จะ reverse ต้องผ่าน super_admin)
 export async function complete(req, res) {
   if (!requireFaculty(req, res)) return;
@@ -783,11 +783,11 @@ export async function complete(req, res) {
   if (existing.created_by_faculty_id !== req.user.faculty_id)
     return forbidden(res, 'ไม่มีสิทธิ์เข้าถึงกิจกรรมนี้');
   if (existing.created_by !== req.user.id)
-    return forbidden(res, 'ปิดโครงการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
+    return forbidden(res, 'เสร็จสิ้นโครงการได้เฉพาะกิจกรรมที่ท่านสร้างเอง');
   if (existing.status !== 'WORK')
     return conflict(
       res,
-      `สถานะ ${existing.status} ไม่อนุญาตให้ปิดโครงการ (ต้องเป็น WORK)`,
+      `สถานะ ${existing.status} ไม่อนุญาตให้เสร็จสิ้นโครงการ (ต้องเป็น WORK)`,
     );
 
   const result = await activities.completeActivity(id);

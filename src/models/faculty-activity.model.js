@@ -540,7 +540,7 @@ export async function submitActivity(id) {
   return rows[0] || null;
 }
 
-// complete: WORK → COMPLETED — ผู้สร้างปิดโครงการเองหลังกิจกรรมจบ
+// complete: WORK → COMPLETED — ผู้สร้างเสร็จสิ้นโครงการเองหลังกิจกรรมจบ
 //   ตรวจ status='WORK' ตรงนี้ (atomic) — ownership/scope ตรวจใน controller layer
 //   คืน updated row หรือ null ถ้า status ไม่ใช่ WORK (race หรือสถานะเปลี่ยนแล้ว)
 export async function completeActivity(id) {
