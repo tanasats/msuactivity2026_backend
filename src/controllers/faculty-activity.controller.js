@@ -286,7 +286,7 @@ function validatePayload(body, { requirePoster = false } = {}) {
   if (!isStr(body.title) || !body.title.trim()) errs.push('กรอก "ชื่อกิจกรรม"');
   if (!isStr(body.location) || !body.location.trim())
     errs.push('กรอก "สถานที่จัด"');
-  if (!isPosInt(body.organization_id)) errs.push('เลือก "หน่วยงานเจ้าของ"');
+  if (!isPosInt(body.organization_id)) errs.push('เลือก "องค์กรเจ้าของ"');
   if (!isPosInt(body.category_id)) errs.push('เลือก "ประเภทกิจกรรม"');
 
   // ปีการศึกษา พ.ศ. — แนวกันค่าผิดประเภท ไม่บังคับช่วงเข้มเกิน
