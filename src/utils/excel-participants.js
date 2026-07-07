@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { thaiDateTimeShort, thaiDate } from './thai-datetime.js';
 
 // ── Excel workbook สำหรับ "รายชื่อผู้เข้าร่วมกิจกรรม" ───────────────
 //   - row 1-5: header info (title, code, schedule, count)
@@ -29,22 +30,11 @@ const EVAL_TH = {
   FAILED: 'ไม่ผ่าน',
 };
 
-// แปลงวันที่ → string "dd/MM/yyyy HH:mm" (พ.ศ.)
-function formatBE(d) {
-  if (!d) return '';
-  const dt = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(dt.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}/${dt.getFullYear() + 543} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-}
-
-function formatBEDate(d) {
-  if (!d) return '';
-  const dt = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(dt.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}/${dt.getFullYear() + 543}`;
-}
+// วันเวลา/วันที่ไทย (Asia/Bangkok, พ.ศ.) — ใช้ util กลาง เพื่อให้เป็นเวลาไทยเสมอ
+//   formatBE     = "dd/MM/yyyy HH:mm" (เดิมใช้เวลา server → บั๊กถ้า server เป็น UTC)
+//   formatBEDate = "dd/MM/yyyy"
+const formatBE = thaiDateTimeShort;
+const formatBEDate = thaiDate;
 
 // สร้าง workbook สำหรับส่งออก → คืน Buffer
 //   activity: { id, code, title, start_at, end_at, capacity, registered_count, hours }

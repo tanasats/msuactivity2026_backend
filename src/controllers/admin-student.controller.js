@@ -14,7 +14,7 @@ import {
   cancelStaffCheckIn,
   revertEvaluation,
 } from '../models/faculty-registration.model.js';
-import { rowsToCsv, sendCsv } from '../utils/csv.js';
+import { rowsToCsv, sendCsv, thaiDateTime } from '../utils/csv.js';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
@@ -129,8 +129,8 @@ const STUDENT_REG_CSV_COLS = [
   { key: 'evaluation_status',     label: 'ผลประเมิน' },
   { key: 'hours',                 label: 'ชั่วโมง' },
   { key: 'loan_hours',            label: 'ชม. กยศ' },
-  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ' },
-  { key: 'attended_at',           label: 'เช็คอินเมื่อ' },
+  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ', format: thaiDateTime },
+  { key: 'attended_at',           label: 'เช็คอินเมื่อ', format: thaiDateTime },
 ];
 
 export async function studentRegistrationsCsv(req, res) {
@@ -218,8 +218,8 @@ const CROSS_CSV_COLS = [
   { key: 'evaluation_status',     label: 'ผลประเมิน' },
   { key: 'hours',                 label: 'ชั่วโมง' },
   { key: 'loan_hours',            label: 'ชม. กยศ' },
-  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ' },
-  { key: 'attended_at',           label: 'เช็คอินเมื่อ' },
+  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ', format: thaiDateTime },
+  { key: 'attended_at',           label: 'เช็คอินเมื่อ', format: thaiDateTime },
 ];
 
 // limit สูงกว่า list (CSV เป็น "ดึงไปวิเคราะห์")

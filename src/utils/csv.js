@@ -12,12 +12,20 @@ function escapeCell(value) {
   return s;
 }
 
-// rows: array ของ object, columns: array ของ { key, label }
+// วันเวลาไทย (Asia/Bangkok) — ใช้ util กลาง; re-export ให้ controllers เดิมยังใช้ได้เหมือนเดิม
+export { thaiDateTime } from './thai-datetime.js';
+
+// rows: array ของ object, columns: array ของ { key, label, format? }
+//   format(value, row) — optional ใช้แปลงค่าก่อน escape (เช่น วันเวลา → เวลาไทย)
 //   ใช้ \r\n เพื่อให้ Excel/Numbers อ่านได้ดีทั้งหมด
 export function rowsToCsv(rows, columns) {
   const lines = [
     columns.map((c) => escapeCell(c.label)).join(','),
-    ...rows.map((r) => columns.map((c) => escapeCell(r[c.key])).join(',')),
+    ...rows.map((r) =>
+      columns
+        .map((c) => escapeCell(c.format ? c.format(r[c.key], r) : r[c.key]))
+        .join(','),
+    ),
   ];
   return lines.join('\r\n');
 }

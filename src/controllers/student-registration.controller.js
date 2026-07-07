@@ -17,7 +17,7 @@ import {
 } from '../models/registration-audit.model.js';
 import { getPresignedGetUrl } from '../utils/s3.js';
 import { getCurrentAcademicYearBE } from '../utils/academic-year.js';
-import { rowsToCsv, sendCsv } from '../utils/csv.js';
+import { rowsToCsv, sendCsv, thaiDateTime } from '../utils/csv.js';
 
 // helper: parse + validate academic_year query param (รับเฉพาะ พ.ศ. 4 หลัก)
 function parseAcademicYear(raw) {
@@ -99,8 +99,8 @@ const STUDENT_REG_CSV_COLS = [
   { key: 'evaluation_status',     label: 'ผลประเมิน' },
   { key: 'hours',                 label: 'ชั่วโมง' },
   { key: 'loan_hours',            label: 'ชม. กยศ' },
-  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ' },
-  { key: 'attended_at',           label: 'เช็คอินเมื่อ' },
+  { key: 'registered_at',         label: 'ลงทะเบียนเมื่อ', format: thaiDateTime },
+  { key: 'attended_at',           label: 'เช็คอินเมื่อ', format: thaiDateTime },
 ];
 
 export async function myRegistrationsCsv(req, res) {
