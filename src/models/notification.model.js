@@ -128,6 +128,15 @@ export async function markAllRead(userId) {
   return rowCount;
 }
 
+// ลบ notification 1 รายการ (เฉพาะของ user นั้น) — คืน true ถ้าลบจริง
+export async function deleteOne(userId, id) {
+  const { rowCount } = await query(
+    `DELETE FROM notifications WHERE id = $1 AND user_id = $2`,
+    [id, userId],
+  );
+  return rowCount > 0;
+}
+
 // retention — ลบ notification ที่ "อ่านแล้ว" และเก่ากว่า N วัน (กันตารางโต)
 export async function pruneReadOlderThan(days = 90) {
   const { rowCount } = await query(

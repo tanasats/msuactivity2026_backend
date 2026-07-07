@@ -206,6 +206,9 @@ export const EVENTS = {
   },
 
   // ===== เจ้าหน้าที่คณะ (ผู้สร้างกิจกรรม) =====
+  //   workflow อนุมัติ/ปฏิเสธ/ส่งขออนุมัติ = วนซ้ำได้หลายรอบ (submit→reject→submit→...)
+  //   → ★ ไม่ใส่ dedupe_key: แต่ละครั้งเป็นคนละเหตุการณ์ = notification รายการใหม่
+  //   (double-fire กันด้วย DB guard `WHERE status=...` ในแต่ละ controller อยู่แล้ว)
   'activity.approved': {
     category: 'activity_workflow',
     resolveRecipients: toActivityOwner,
@@ -216,7 +219,6 @@ export const EVENTS = {
       }`,
       link_url: `/dashboard/faculty/activities/${ctx.activity?.id}`,
       related_activity_id: ctx.activity?.id,
-      dedupe_key: `activity.approved:${ctx.activity?.id}`,
     }),
   },
   'activity.rejected': {
@@ -229,7 +231,6 @@ export const EVENTS = {
       }`,
       link_url: `/dashboard/faculty/activities/${ctx.activity?.id}`,
       related_activity_id: ctx.activity?.id,
-      dedupe_key: `activity.rejected:${ctx.activity?.id}`,
     }),
   },
   'activity.full': {
@@ -259,13 +260,13 @@ export const EVENTS = {
   // ===== admin / super_admin =====
   'activity.pending_approval': {
     category: 'approval_queue',
+    // ★ ไม่ใส่ dedupe_key: ส่งขออนุมัติซ้ำได้หลายรอบ → แจ้ง admin ใหม่ทุกครั้ง
     resolveRecipients: () => getActiveUsersByRole(['admin', 'super_admin']),
     render: (ctx) => ({
       title: 'มีกิจกรรมรออนุมัติ',
       body: `"${ctx.activity?.title ?? 'กิจกรรม'}" ส่งขออนุมัติ`,
       link_url: `/dashboard/admin/activities/${ctx.activity?.id}`,
       related_activity_id: ctx.activity?.id,
-      dedupe_key: `activity.pending_approval:${ctx.activity?.id}`,
     }),
   },
   'certificate.requested': {

@@ -93,6 +93,17 @@ export async function markRead(req, res) {
   res.json({ status: 'ok', changed });
 }
 
+// DELETE /api/me/notifications/:id — ลบ notification ส่วนตัวที่ไม่ต้องการ
+//   (ประกาศ broadcast ลบไม่ได้ — เป็นของกลาง; frontend ซ่อนปุ่มลบให้)
+export async function deleteNotification(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ status: 'error', message: 'invalid id' });
+  }
+  const deleted = await model.deleteOne(req.user.id, id);
+  res.json({ status: 'ok', deleted });
+}
+
 // POST /api/me/notifications/read-all — อ่านทั้ง notification ส่วนตัว + ประกาศ active
 export async function markAllRead(req, res) {
   const changedPersonal = await model.markAllRead(req.user.id);
