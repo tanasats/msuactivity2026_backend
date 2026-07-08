@@ -7,20 +7,28 @@ import { query } from '../db/index.js';
 //                           filter เฉพาะ active = PENDING_APPROVAL | REGISTERED | ATTENDED
 //                           (ไม่นับ CANCELLED / REJECTED / NO_SHOW)
 //   - members_count       = จำนวนสมาชิกในระบบที่ active (ทุก role)
-export async function getPublicStats(academicYearBE) {
+//   academicYearBE = null → นับทุกปีการศึกษา (ไม่กรองปี); members_count = ทั้งระบบเสมอ
+export async function getPublicStats(academicYearBE = null) {
+  const params = academicYearBE !== null ? [academicYearBE] : [];
+  const actYear = academicYearBE !== null ? 'WHERE academic_year = $1' : '';
+  const regYear = academicYearBE !== null ? 'AND a.academic_year = $1' : '';
   const { rows } = await query(
     `SELECT
-       (SELECT COUNT(*)::int FROM activities WHERE academic_year = $1)
+       (SELECT COUNT(*)::int FROM activities ${actYear})
          AS activities_count,
        (SELECT COUNT(*)::int FROM registrations r
           JOIN activities a ON a.id = r.activity_id
-          WHERE a.academic_year = $1
-            AND r.status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED'))
+          WHERE r.status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED') ${regYear})
          AS registrations_count,
+       -- นิสิตที่เข้าร่วม (นับหัวไม่ซ้ำ) — reach จริง ต่างจาก registrations_count ที่นับ row
+       (SELECT COUNT(DISTINCT r.user_id)::int FROM registrations r
+          JOIN activities a ON a.id = r.activity_id
+          WHERE r.status IN ('PENDING_APPROVAL','REGISTERED','ATTENDED') ${regYear})
+         AS participants_count,
        (SELECT COUNT(*)::int FROM users WHERE status = 'active')
          AS members_count
     `,
-    [academicYearBE],
+    params,
   );
   return rows[0];
 }
