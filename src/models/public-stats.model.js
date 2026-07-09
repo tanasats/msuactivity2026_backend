@@ -10,11 +10,11 @@ import { query } from '../db/index.js';
 //   academicYearBE = null → นับทุกปีการศึกษา (ไม่กรองปี); members_count = ทั้งระบบเสมอ
 export async function getPublicStats(academicYearBE = null) {
   const params = academicYearBE !== null ? [academicYearBE] : [];
-  const actYear = academicYearBE !== null ? 'WHERE academic_year = $1' : '';
+  const actYear = academicYearBE !== null ? 'AND academic_year = $1' : '';
   const regYear = academicYearBE !== null ? 'AND a.academic_year = $1' : '';
   const { rows } = await query(
     `SELECT
-       (SELECT COUNT(*)::int FROM activities ${actYear})
+       (SELECT COUNT(*)::int FROM activities a WHERE a.status IN ('DRAFT','PENDING_APPROVAL','WORK','COMPLETED') ${actYear})
          AS activities_count,
        (SELECT COUNT(*)::int FROM registrations r
           JOIN activities a ON a.id = r.activity_id
